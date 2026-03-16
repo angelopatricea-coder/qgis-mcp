@@ -143,6 +143,8 @@ class QgisMCPServer(QObject):
             self.timer.start(25)  # 25ms interval
 
             msg_log = QgsApplication.messageLog()
+            # QGIS 4.x routes messages through messageReceivedWithFormat only;
+            # messageReceived no longer fires.  Fall back for 3.x.
             if hasattr(msg_log, "messageReceivedWithFormat"):
                 msg_log.messageReceivedWithFormat.connect(self._capture_message)
             else:
@@ -997,7 +999,7 @@ class QgisMCPServer(QObject):
             timeout_timer.start(self._RENDER_TIMEOUT * 1000)
 
             render.start()
-            loop.exec_()
+            loop.exec()
 
             timeout_timer.stop()
             if timed_out:
@@ -1337,12 +1339,16 @@ class QgisMCPServer(QObject):
     _LEVEL_MAP: ClassVar[dict[int, str]] = {0: "info", 1: "warning", 2: "critical", 3: "success"}
 
     def _capture_message(self, message, tag, level, *_extra):
-        """Capture a message log entry into the deque."""
+        """Capture a message log entry into the deque.
+
+        QGIS 4.x messageReceivedWithFormat sends a 4th arg (StringFormat);
+        *_extra absorbs it so the same handler works for both signals.
+        """
         self._message_log.append(
             {
                 "tag": tag,
                 "message": message,
-                "level": self._LEVEL_MAP.get(level, str(level)),
+                "level": self._LEVEL_MAP.get(int(level), str(level)),
                 "timestamp": datetime.now(tz=UTC).isoformat(),
             }
         )
