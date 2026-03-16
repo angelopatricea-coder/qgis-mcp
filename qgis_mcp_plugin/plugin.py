@@ -127,7 +127,13 @@ class QgisMCPServer(QObject):
             self.timer.timeout.connect(self.process_server)
             self.timer.start(25)  # 25ms interval
 
-            QgsApplication.messageLog().messageReceived.connect(self._capture_message)
+            msg_log = QgsApplication.messageLog()
+            # QGIS 4.x routes messages through messageReceivedWithFormat only;
+            # messageReceived no longer fires.  Fall back for 3.x.
+            if hasattr(msg_log, "messageReceivedWithFormat"):
+                msg_log.messageReceivedWithFormat.connect(self._capture_message)
+            else:
+                msg_log.messageReceived.connect(self._capture_message)
             QgsMessageLog.logMessage(
                 f"QGIS MCP server started on {self.host}:{self.port}", self.LOG_TAG, MSG_INFO
             )
@@ -142,7 +148,11 @@ class QgisMCPServer(QObject):
         self.running = False
 
         with contextlib.suppress(Exception):
-            QgsApplication.messageLog().messageReceived.disconnect(self._capture_message)
+            msg_log = QgsApplication.messageLog()
+            if hasattr(msg_log, "messageReceivedWithFormat"):
+                msg_log.messageReceivedWithFormat.disconnect(self._capture_message)
+            else:
+                msg_log.messageReceived.disconnect(self._capture_message)
 
         if self.timer:
             self.timer.stop()
@@ -722,7 +732,7 @@ class QgisMCPServer(QObject):
             raise Exception(f"Layer not found: {layer_id}")
 
         tree_layer = project.layerTreeRoot().findLayer(layer_id)
-        if not tree_layer:
+        if tree_layer is None:
             raise Exception(f"Layer not found in layer tree: {layer_id}")
 
         tree_layer.setItemVisibilityChecked(visible)
@@ -964,7 +974,7 @@ class QgisMCPServer(QObject):
             timeout_timer.start(self._RENDER_TIMEOUT * 1000)
 
             render.start()
-            loop.exec_()
+            loop.exec()
 
             timeout_timer.stop()
             if timed_out:
@@ -1303,13 +1313,17 @@ class QgisMCPServer(QObject):
 
     _LEVEL_MAP: ClassVar[dict[int, str]] = {0: "info", 1: "warning", 2: "critical", 3: "success"}
 
-    def _capture_message(self, message, tag, level):
-        """Capture a message log entry into the deque."""
+    def _capture_message(self, message, tag, level, *_extra):
+        """Capture a message log entry into the deque.
+
+        QGIS 4.x messageReceivedWithFormat sends a 4th arg (StringFormat);
+        *_extra absorbs it so the same handler works for both signals.
+        """
         self._message_log.append(
             {
                 "tag": tag,
                 "message": message,
-                "level": self._LEVEL_MAP.get(level, str(level)),
+                "level": self._LEVEL_MAP.get(int(level), str(level)),
                 "timestamp": datetime.now(tz=UTC).isoformat(),
             }
         )
@@ -1391,7 +1405,7 @@ class QgisMCPServer(QObject):
         root = QgsProject.instance().layerTreeRoot()
         if parent:
             target = root.findGroup(parent)
-            if not target:
+            if target is None:
                 raise Exception(f"Parent group not found: {parent}")
         else:
             target = root
@@ -1403,11 +1417,11 @@ class QgisMCPServer(QObject):
         root = project.layerTreeRoot()
 
         node = root.findLayer(layer_id)
-        if not node:
+        if node is None:
             raise Exception(f"Layer not found in tree: {layer_id}")
 
         target = root.findGroup(group_name)
-        if not target:
+        if target is None:
             raise Exception(f"Group not found: {group_name}")
 
         clone = node.clone()
