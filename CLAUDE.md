@@ -92,7 +92,7 @@ uv run --no-sync pytest tests/ -v
 | `execute_processing` | Execute Processing | — | Run QGIS Processing algorithm (60s, async+progress+logging) |
 | `list_processing_algorithms` | List Processing Algorithms | readOnly | Search algorithms by keyword/provider |
 | `get_algorithm_help` | Get Algorithm Help | readOnly | Algorithm parameters, outputs, description |
-| `create_processing_model` | Create Processing Model | — | Build a `.model3` workflow from a structured spec (inputs, steps, outputs); supports `@input` / `$step.OUTPUT` / `=expression` references |
+| `create_processing_model` | Create Processing Model | — | Build a `.model3` workflow from a structured spec (inputs, steps, outputs); always saved into the QGIS user models folder and registered (numeric suffix on name collision); supports `@input` / `$step.OUTPUT` / `=expression` references |
 | `render_map` | Render Map | idempotent | Render canvas to inline image (60s, async+progress+logging) |
 | `execute_code` | Execute Code | destructive | Run arbitrary PyQGIS code (60s, async+progress+logging) |
 | `batch_commands` | Batch Commands | — | Multiple commands in one round-trip |

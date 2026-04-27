@@ -1429,14 +1429,12 @@ class QgisMCPServer(QObject):
         steps,
         inputs=None,
         outputs=None,
-        path=None,
         description="",
         group="Models",
-        register=False,
-        overwrite=False,
         **kwargs,
     ):
-        """Build a Processing Model from a structured spec and save it to a .model3 file.
+        """Build a Processing Model from a structured spec, save it into the
+        QGIS user models folder under a unique name, and register it.
 
         Reference syntax in step parameter values:
           "@input_name"        – model input parameter
@@ -1451,9 +1449,39 @@ class QgisMCPServer(QObject):
 
         registry = QgsApplication.processingRegistry()
 
+        # ---- Resolve models folder & pick a unique file name up front ----
+        provider = registry.providerById("model")
+        models_dir = None
+        if provider is not None and hasattr(provider, "modelsFolder"):
+            try:
+                models_dir = provider.modelsFolder()
+            except Exception:
+                models_dir = None
+        if models_dir is None:
+            models_dir = os.path.join(
+                QgsApplication.qgisSettingsDirPath(), "processing", "models"
+            )
+        os.makedirs(models_dir, exist_ok=True)
+
+        final_name = name
+        target_path = os.path.join(models_dir, f"{final_name}.model3")
+        if os.path.exists(target_path):
+            for suffix in range(2, 1001):
+                candidate = f"{name}_{suffix}"
+                candidate_path = os.path.join(models_dir, f"{candidate}.model3")
+                if not os.path.exists(candidate_path):
+                    final_name = candidate
+                    target_path = candidate_path
+                    break
+            else:
+                raise Exception(
+                    f"Could not find a unique name for '{name}' in {models_dir} "
+                    "(tried up to _1000)"
+                )
+
         # ---- Build model skeleton ----
         model = QgsProcessingModelAlgorithm()
-        model.setName(name)
+        model.setName(final_name)
         if group:
             model.setGroup(group)
         if description:
@@ -1568,48 +1596,13 @@ class QgisMCPServer(QObject):
                 mo.setDescription("Result")
                 last_child.setModelOutputs({"Result": mo})
 
-        # ---- Resolve target path ----
-        models_dir = None
-        provider = registry.providerById("model")
-        if provider is not None and hasattr(provider, "modelsFolder"):
-            try:
-                models_dir = provider.modelsFolder()
-            except Exception:
-                models_dir = None
-        if models_dir is None:
-            models_dir = os.path.join(
-                QgsApplication.qgisSettingsDirPath(), "processing", "models"
-            )
-
-        if path:
-            target_path = os.path.expanduser(path)
-            if not target_path.endswith(".model3"):
-                target_path += ".model3"
-        elif register:
-            os.makedirs(models_dir, exist_ok=True)
-            target_path = os.path.join(models_dir, f"{name}.model3")
-        else:
-            raise Exception("Either 'path' must be provided or 'register' must be True")
-
-        if os.path.exists(target_path) and not overwrite:
-            raise Exception(
-                f"File already exists: {target_path}. Pass overwrite=True to replace it."
-            )
-
-        os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
+        # ---- Write the .model3 file directly into the models folder ----
         if not model.toFile(target_path):
             raise Exception(f"Failed to write model to {target_path}")
 
-        # ---- Optional registration in the user's models folder ----
+        # ---- Register with the model provider so it shows up in the toolbox ----
         registered = False
-        registered_path = None
-        if register and provider is not None:
-            os.makedirs(models_dir, exist_ok=True)
-            registered_path = os.path.join(models_dir, f"{name}.model3")
-            if os.path.abspath(registered_path) != os.path.abspath(target_path):
-                import shutil
-
-                shutil.copyfile(target_path, registered_path)
+        if provider is not None:
             try:
                 provider.refreshAlgorithms()
                 registered = True
@@ -1619,14 +1612,14 @@ class QgisMCPServer(QObject):
                 )
 
         QgsMessageLog.logMessage(
-            f"Processing model '{name}' saved to {target_path}", self.LOG_TAG, MSG_INFO
+            f"Processing model '{final_name}' saved to {target_path}", self.LOG_TAG, MSG_INFO
         )
         return {
             "ok": True,
-            "name": name,
+            "name": final_name,
+            "requested_name": name,
             "path": target_path,
             "registered": registered,
-            "registered_path": registered_path if registered else None,
             "input_count": len(defined_inputs),
             "step_count": len(defined_steps),
             "output_count": sum(len(v) for v in outputs_by_step.values()) or (1 if defined_steps else 0),

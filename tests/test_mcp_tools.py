@@ -475,10 +475,10 @@ async def test_create_processing_model_tool(mock_connection):
         "status": "success",
         "result": {
             "ok": True,
-            "name": "buffer_centroids",
-            "path": "/tmp/buffer_centroids.model3",
-            "registered": False,
-            "registered_path": None,
+            "name": "buffer_centroids_2",
+            "requested_name": "buffer_centroids",
+            "path": "/home/u/.local/share/QGIS/QGIS3/profiles/default/processing/models/buffer_centroids_2.model3",
+            "registered": True,
             "input_count": 2,
             "step_count": 2,
             "output_count": 1,
@@ -511,12 +511,13 @@ async def test_create_processing_model_tool(mock_connection):
         steps=steps,
         inputs=inputs,
         outputs=outputs,
-        path="/tmp/buffer_centroids.model3",
     )
     assert output["ok"] is True
     assert output["step_count"] == 2
+    assert output["registered"] is True
+    assert output["requested_name"] == "buffer_centroids"
 
-    # Long timeout, full payload forwarded
+    # Long timeout, full payload forwarded — no path/register/overwrite fields anymore
     mock_connection.send_command.assert_called_once()
     call_args = mock_connection.send_command.call_args
     assert call_args[0][0] == "create_processing_model"
@@ -525,9 +526,9 @@ async def test_create_processing_model_tool(mock_connection):
     assert sent["steps"] == steps
     assert sent["inputs"] == inputs
     assert sent["outputs"] == outputs
-    assert sent["path"] == "/tmp/buffer_centroids.model3"
-    assert sent["register"] is False
-    assert sent["overwrite"] is False
+    assert "path" not in sent
+    assert "register" not in sent
+    assert "overwrite" not in sent
     # Uses the long timeout for processing operations
     assert call_args[1]["timeout"] == 60
 

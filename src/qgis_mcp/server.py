@@ -726,7 +726,8 @@ async def get_algorithm_help(ctx: Context, algorithm_id: str) -> dict[str, Any]:
 @mcp.tool(
     title="Create Processing Model",
     description=(
-        "Build and save a QGIS Processing Model (.model3 workflow) from a structured spec. "
+        "Build a QGIS Processing Model (.model3 workflow) from a structured spec, save it into "
+        "the QGIS user models folder, and register it in the Processing Toolbox. "
         "This is the only call needed: algorithm discovery and parameter validation happen "
         "inside the plugin against the live QGIS Processing registry — DO NOT call "
         "list_processing_algorithms or get_algorithm_help first. Pass a keyword like 'buffer' "
@@ -745,9 +746,11 @@ async def get_algorithm_help(ctx: Context, algorithm_id: str) -> dict[str, Any]:
         "    anything else      – a static literal (number, bool, string, list, ...)\n"
         "  outputs: [{name, from_step, from_output, description?}] – final outputs the model exposes. "
         "If omitted, the OUTPUT of the last step is exposed automatically as 'Result'.\n\n"
-        "Save modes: pass 'path' to save anywhere, or set register=True to also copy the model into the "
-        "user's Processing models folder so it appears in the Processing Toolbox after refresh.\n\n"
-        "The response echoes 'resolved_steps' so the caller can verify which algorithm each hint mapped to."
+        "The model is always saved into the QGIS user profile's Processing models folder. If "
+        "'<name>.model3' already exists, a unique suffix is appended ('<name>_2.model3', "
+        "'<name>_3.model3', ...). The actual filename used is returned as 'name' alongside the "
+        "originally requested name as 'requested_name'. The response also echoes 'resolved_steps' "
+        "so the caller can verify which algorithm each hint mapped to."
     ),
     structured_output=True,
 )
@@ -757,11 +760,8 @@ async def create_processing_model(
     steps: list[dict],
     inputs: list[dict] | None = None,
     outputs: list[dict] | None = None,
-    path: str | None = None,
     description: str = "",
     group: str = "Models",
-    register: bool = False,
-    overwrite: bool = False,
 ) -> dict[str, Any]:
     await ctx.info(f"Building Processing model: {name} ({len(steps)} step(s))")
     params: dict[str, Any] = {
@@ -769,15 +769,11 @@ async def create_processing_model(
         "steps": steps,
         "description": description,
         "group": group,
-        "register": register,
-        "overwrite": overwrite,
     }
     if inputs is not None:
         params["inputs"] = inputs
     if outputs is not None:
         params["outputs"] = outputs
-    if path is not None:
-        params["path"] = path
     return await _send("create_processing_model", params, timeout=TIMEOUT_LONG)
 
 
@@ -1525,14 +1521,7 @@ def spatial_analysis_prompt(
     name="create_processing_model",
     description="Translate a natural-language workflow description into a saved QGIS Processing Model",
 )
-def create_processing_model_prompt(
-    description: str, path: str | None = None
-) -> list[UserMessage]:
-    target = (
-        f"Save the model to: {path}."
-        if path
-        else "Ask the user where to save the model, or pass register=True to drop it into the user's Processing models folder."
-    )
+def create_processing_model_prompt(description: str) -> list[UserMessage]:
     return [
         UserMessage(
             content=(
@@ -1545,9 +1534,11 @@ def create_processing_model_prompt(
                 "if a keyword is ambiguous the tool returns the candidate list so you can retry "
                 "with a more specific hint. Reference model inputs as '@name', earlier step "
                 "outputs as '$step_id.OUTPUT', and QGIS expressions as '=expr'. "
-                f"{target} "
-                "After the call, summarize the resolved_steps it returned so the user can verify "
-                "the algorithm choices."
+                "The model is always saved into the QGIS user models folder and registered in the "
+                "Processing Toolbox; if the requested name is taken the tool appends a numeric "
+                "suffix and returns the actual filename used. "
+                "After the call, summarize the resolved_steps it returned and tell the user the "
+                "final model name so they can find it in the toolbox."
             )
         )
     ]

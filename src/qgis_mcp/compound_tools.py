@@ -444,9 +444,10 @@ def register_compound_tools(mcp: FastMCP, _send, _confirm_destructive):
             "- list_algorithms: search (str, optional), provider (str, optional)\n"
             "- get_help: algorithm_id (str)\n"
             "- create_model: name (str), steps (list[dict]), inputs (list[dict], optional), "
-            "outputs (list[dict], optional), path (str, optional), description (str, optional), "
-            "group (str, optional), register (bool, optional), overwrite (bool, optional). "
-            "Step parameter values support '@input', '$step.OUTPUT', '=expression', or static literals."
+            "outputs (list[dict], optional), description (str, optional), group (str, optional). "
+            "Step parameter values support '@input', '$step.OUTPUT', '=expression', or static literals. "
+            "The model is always saved into the QGIS user models folder and registered; a numeric "
+            "suffix is appended to the name on collision."
         ),
     )
     async def processing(ctx: Context, action: str, **kwargs) -> dict[str, Any]:
@@ -478,10 +479,8 @@ def register_compound_tools(mcp: FastMCP, _send, _confirm_destructive):
                 "steps": kwargs["steps"],
                 "description": kwargs.get("description", ""),
                 "group": kwargs.get("group", "Models"),
-                "register": kwargs.get("register", False),
-                "overwrite": kwargs.get("overwrite", False),
             }
-            for key in ("inputs", "outputs", "path"):
+            for key in ("inputs", "outputs"):
                 if key in kwargs and kwargs[key] is not None:
                     params[key] = kwargs[key]
             return await _send("create_processing_model", params, timeout=TIMEOUT_LONG)
