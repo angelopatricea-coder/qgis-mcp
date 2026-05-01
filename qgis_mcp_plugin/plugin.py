@@ -53,13 +53,14 @@ from qgis.core import (
     QgsVectorLayerJoinInfo,
     QgsWkbTypes,
 )
-from qgis.PyQt.QtCore import QBuffer, QByteArray, QObject, QSize, QTimer, QUrl, QVariant
+from qgis.PyQt.QtCore import QBuffer, QByteArray, QObject, QProcess, QSize, QTimer, QUrl, QVariant
 from qgis.PyQt.QtGui import QColor, QDesktopServices, QIcon
 from qgis.PyQt.QtWidgets import (
     QAction,
     QCheckBox,
     QComboBox,
     QDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -1950,9 +1951,11 @@ class MCPConfiguratorDialog(QDialog):
 
         self.repo_dir = Path(__file__).resolve().parent.parent
         self.github_url = "git+https://github.com/nkarasiak/qgis-mcp.git"
+        self.setup_process = None
 
         self.init_ui()
         self.refresh_status()
+        self.refresh_checklist()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -1993,12 +1996,40 @@ class MCPConfiguratorDialog(QDialog):
             "<li><b>Configure Client:</b> Use the 'Auto-Config' tab to add QGIS to your favorite LLM client.</li>"
             "<li><b>Dependencies:</b> Ensure <code>uv</code> is installed on your system for best experience.</li>"
             "</ol>"
-            "<p>For more details, visit the <a href='https://github.com/nkarasiak/qgis-mcp'>GitHub repository</a>.</p>"
         )
-        label = QLabel(text)
-        label.setWordWrap(True)
-        label.setOpenExternalLinks(True)
-        layout.addWidget(label)
+        self.guide_label = QLabel(text)
+        self.guide_label.setWordWrap(True)
+        self.guide_label.setOpenExternalLinks(True)
+        layout.addWidget(self.guide_label)
+
+        # Health Checklist Group
+        self.checklist_group = QGroupBox("Health Checklist")
+        checklist_layout = QVBoxLayout()
+
+        self.status_link = QLabel("Plugin Link Status: Checking...")
+        self.status_uv = QLabel("uv Installation: Checking...")
+        self.status_venv = QLabel("Python Venv Ready: Checking...")
+        self.status_entry = QLabel("MCP Server Entry Point: Checking...")
+
+        checklist_layout.addWidget(self.status_link)
+        checklist_layout.addWidget(self.status_uv)
+        checklist_layout.addWidget(self.status_venv)
+        checklist_layout.addWidget(self.status_entry)
+
+        # Checklist Buttons
+        check_btn_layout = QHBoxLayout()
+        self.refresh_check_btn = QPushButton("Refresh Checklist")
+        self.refresh_check_btn.clicked.connect(self.refresh_checklist)
+        check_btn_layout.addWidget(self.refresh_check_btn)
+
+        self.setup_env_btn = QPushButton("Setup Environment")
+        self.setup_env_btn.clicked.connect(self.setup_environment)
+        self.setup_env_btn.setToolTip("Run 'uv sync' or 'pip install -e .' in the repository")
+        check_btn_layout.addWidget(self.setup_env_btn)
+
+        checklist_layout.addLayout(check_btn_layout)
+        self.checklist_group.setLayout(checklist_layout)
+        layout.addWidget(self.checklist_group)
 
         self.relink_btn = QPushButton("Ensure Plugin is Linked (Symlink)")
         self.relink_btn.clicked.connect(self.relink_plugin)
@@ -2019,6 +2050,7 @@ class MCPConfiguratorDialog(QDialog):
             if target.exists() or target.is_symlink():
                 if target.is_symlink() and target.resolve() == plugin_src.resolve():
                     QgsMessageLog.logMessage("Plugin already correctly linked.", "MCP", MSG_INFO)
+                    self.refresh_checklist()
                     return
                 if target.is_symlink() or target.is_file():
                     target.unlink()
@@ -2036,8 +2068,75 @@ class MCPConfiguratorDialog(QDialog):
             else:
                 target.symlink_to(plugin_src)
             QgsMessageLog.logMessage(f"Linked plugin: {target} -> {plugin_src}", "MCP", MSG_INFO)
+            self.refresh_checklist()
         except Exception as e:
             QgsMessageLog.logMessage(f"Failed to link plugin: {e}", "MCP", MSG_CRITICAL)
+
+    def refresh_checklist(self):
+        """Update the health checklist labels."""
+        # 1. Plugin Link Status
+        plugins_dir = self._get_qgis_plugins_dir()
+        target = plugins_dir / "qgis_mcp_plugin"
+        is_linked = target.is_symlink() and target.resolve() == (self.repo_dir / "qgis_mcp_plugin").resolve()
+        
+        self.status_link.setText(f"Plugin Link Status: {'✅ (linked)' if is_linked else '❌ (not linked)'}")
+        self.status_link.setStyleSheet(f"color: {'green' if is_linked else 'red'};")
+
+        # 2. uv Installation
+        has_uv = bool(shutil.which("uv"))
+        self.status_uv.setText(f"uv Installation: {'✅ (found)' if has_uv else '❌ (missing)'}")
+        self.status_uv.setStyleSheet(f"color: {'green' if has_uv else 'red'};")
+
+        # 3. Python Venv Ready
+        has_venv = (self.repo_dir / ".venv").exists()
+        self.status_venv.setText(f"Python Venv Ready: {'✅ (ready)' if has_venv else '❌ (missing)'}")
+        self.status_venv.setStyleSheet(f"color: {'green' if has_venv else 'red'};")
+
+        # 4. MCP Server Entry Point
+        has_entry = (self.repo_dir / "src" / "qgis_mcp" / "server.py").exists()
+        self.status_entry.setText(f"MCP Server Entry Point: {'✅ (exists)' if has_entry else '❌ (missing)'}")
+        self.status_entry.setStyleSheet(f"color: {'green' if has_entry else 'red'};")
+
+    def setup_environment(self):
+        """Run environment setup in background."""
+        if self.setup_process and self.setup_process.state() == QProcess.Running:
+            return
+
+        has_uv = bool(shutil.which("uv"))
+        cmd = "uv" if has_uv else "pip"
+        args = ["sync"] if has_uv else ["install", "-e", "."]
+
+        self.setup_env_btn.setEnabled(False)
+        self.setup_env_btn.setText("Setting up...")
+        
+        self.setup_process = QProcess()
+        self.setup_process.setWorkingDirectory(str(self.repo_dir))
+        self.setup_process.readyReadStandardOutput.connect(self._on_setup_output)
+        self.setup_process.readyReadStandardError.connect(self._on_setup_output)
+        self.setup_process.finished.connect(self._on_setup_finished)
+
+        QgsMessageLog.logMessage(f"Starting environment setup: {cmd} {' '.join(args)}", "MCP", MSG_INFO)
+        self.setup_process.start(cmd, args)
+
+    def _on_setup_output(self):
+        data = self.setup_process.readAllStandardOutput().data().decode().strip()
+        if not data:
+            data = self.setup_process.readAllStandardError().data().decode().strip()
+        if data:
+            for line in data.splitlines():
+                QgsMessageLog.logMessage(f"[Setup] {line}", "MCP", MSG_INFO)
+
+    def _on_setup_finished(self, exit_code, exit_status):
+        self.setup_env_btn.setEnabled(True)
+        self.setup_env_btn.setText("Setup Environment")
+        
+        if exit_code == 0:
+            QgsMessageLog.logMessage("Environment setup finished successfully.", "MCP", MSG_INFO)
+        else:
+            QgsMessageLog.logMessage(f"Environment setup failed (exit code {exit_code}).", "MCP", MSG_CRITICAL)
+        
+        self.refresh_checklist()
+        self.setup_process = None
 
     def init_config_tab(self):
         layout = QVBoxLayout(self.config_tab)
@@ -2338,6 +2437,35 @@ class QgisMCPPlugin:
         if self.autostart_cb.isChecked():
             self.action.setChecked(True)
             self.toggle_server(True)
+
+        # Proactive Welcome / Setup check
+        QTimer.singleShot(1000, self._proactive_setup_check)
+
+    def _proactive_setup_check(self):
+        """Check if setup is needed and show a welcome message."""
+        settings = QgsSettings()
+        first_run = settings.value(f"{self.SETTINGS_PREFIX}/first_run", True, type=bool)
+        
+        # Check link status
+        repo_dir = Path(__file__).resolve().parent.parent
+        plugins_dir = Path(QgsApplication.qgisSettingsDirPath()) / "python" / "plugins"
+        target = plugins_dir / "qgis_mcp_plugin"
+        is_linked = target.is_symlink() and target.resolve() == (repo_dir / "qgis_mcp_plugin").resolve()
+
+        if first_run or not is_linked:
+            msg = "Welcome to QGIS MCP! It looks like you might need to complete the setup."
+            if not is_linked:
+                msg = "QGIS MCP plugin is not linked to your repository. Some features might not work."
+            
+            self.iface.messageBar().pushMessage(
+                "QGIS MCP",
+                f"{msg} Open the 'MCP Setup & Configurator' to get started.",
+                level=Qgis.Info,
+                duration=10
+            )
+            
+            if first_run:
+                settings.setValue(f"{self.SETTINGS_PREFIX}/first_run", False)
 
     def _save_autostart(self, checked):
         """Persist auto-start preference."""
