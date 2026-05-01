@@ -24,15 +24,20 @@ from qgis.core import (
     QgsExpressionContextUtils,
     QgsFeature,
     QgsFeatureRequest,
+    QgsField,
     QgsGeometry,
     QgsGraduatedSymbolRenderer,
     QgsLayerTreeGroup,
     QgsLayerTreeLayer,
     QgsLayoutExporter,
+    QgsLayoutItemMap,
+    QgsLayoutPoint,
+    QgsLayoutSize,
     QgsMapRendererParallelJob,
     QgsMapSettings,
     QgsMessageLog,
     QgsPointXY,
+    QgsPrintLayout,
     QgsProject,
     QgsRasterLayer,
     QgsRectangle,
@@ -42,6 +47,7 @@ from qgis.core import (
     QgsStyle,
     QgsSymbol,
     QgsVectorLayer,
+    QgsVectorLayerJoinInfo,
     QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QBuffer, QByteArray, QObject, QSize, QTimer, QUrl, QVariant
@@ -323,6 +329,16 @@ class QgisMCPServer(QObject):
                 "remove_map_theme": self.remove_map_theme,
                 "apply_map_theme": self.apply_map_theme,
                 "set_project_crs": self.set_project_crs,
+                # Phase 6 — Extended capabilities
+                "add_web_layer": self.add_web_layer,
+                "add_table_join": self.add_table_join,
+                "add_field": self.add_field,
+                "delete_field": self.delete_field,
+                "rename_field": self.rename_field,
+                "apply_style_qml": self.apply_style_qml,
+                "save_style_qml": self.save_style_qml,
+                "create_layout": self.create_layout,
+                "add_layout_map": self.add_layout_map,
             }
 
             handler = handlers.get(cmd_type)
@@ -1774,6 +1790,147 @@ class QgisMCPServer(QObject):
             raise ValueError(f"Invalid CRS: {crs}")
         QgsProject.instance().setCrs(new_crs)
         return {"ok": True, "crs": new_crs.authid(), "description": new_crs.description()}
+
+    # -----------------------------------------------------------------------
+    # Phase 6 — Extended capabilities
+    # -----------------------------------------------------------------------
+
+    def add_web_layer(self, url, service, name=None, crs="EPSG:3857", **kwargs):
+        """Add a web layer (XYZ, WMS, WFS) to the project."""
+        service = service.lower()
+        if service == "xyz":
+            uri = f"type=xyz&url={url}"
+            layer = QgsRasterLayer(uri, name or "XYZ Layer", "wms")
+        elif service == "wms":
+            layer = QgsRasterLayer(url, name or "WMS Layer", "wms")
+        elif service == "wfs":
+            layer = QgsVectorLayer(url, name or "WFS Layer", "WFS")
+        else:
+            raise Exception(f"Unsupported web service: {service}. Use 'xyz', 'wms', or 'wfs'")
+
+        if not layer.isValid():
+            raise Exception(f"Layer is not valid: {url}")
+
+        QgsProject.instance().addMapLayer(layer)
+        return {"id": layer.id(), "name": layer.name(), "type": self._get_layer_type(layer)}
+
+    def add_table_join(
+        self, target_layer_id, join_layer_id, target_field, join_field, prefix="", **kwargs
+    ):
+        """Add a table join to a vector layer."""
+        target_layer = self._get_vector_layer(target_layer_id)
+        join_layer = self._get_vector_layer(join_layer_id)
+
+        join_info = QgsVectorLayerJoinInfo()
+        join_info.setTargetFieldName(target_field)
+        join_info.setJoinLayerId(join_layer.id())
+        join_info.setJoinFieldName(join_field)
+        join_info.setUsingMemoryCache(True)
+        if prefix:
+            join_info.setPrefix(prefix)
+
+        if target_layer.addJoin(join_info):
+            return {"ok": True}
+        else:
+            raise Exception("Failed to add table join")
+
+    def add_field(self, layer_id, field_name, field_type, length=None, precision=None, **kwargs):
+        """Add a field to a vector layer."""
+        layer = self._get_vector_layer(layer_id)
+
+        type_map = {
+            "string": QVariant.String,
+            "int": QVariant.Int,
+            "double": QVariant.Double,
+            "bool": QVariant.Bool,
+            "date": QVariant.Date,
+            "datetime": QVariant.DateTime,
+        }
+        v_type = type_map.get(field_type.lower(), QVariant.String)
+        field = QgsField(field_name, v_type, field_type, length or 0, precision or 0)
+
+        if layer.dataProvider().addAttributes([field]):
+            layer.updateFields()
+            return {"ok": True, "field_name": field_name}
+        else:
+            raise Exception(f"Failed to add field: {field_name}")
+
+    def delete_field(self, layer_id, field_name, **kwargs):
+        """Delete a field from a vector layer."""
+        layer = self._get_vector_layer(layer_id)
+        idx = layer.fields().indexOf(field_name)
+        if idx < 0:
+            raise Exception(f"Field not found: {field_name}")
+
+        if layer.dataProvider().deleteAttributes([idx]):
+            layer.updateFields()
+            return {"ok": True, "field_name": field_name}
+        else:
+            raise Exception(f"Failed to delete field: {field_name}")
+
+    def rename_field(self, layer_id, old_name, new_name, **kwargs):
+        """Rename a field in a vector layer."""
+        layer = self._get_vector_layer(layer_id)
+        idx = layer.fields().indexOf(old_name)
+        if idx < 0:
+            raise Exception(f"Field not found: {old_name}")
+
+        if layer.dataProvider().renameAttributes({idx: new_name}):
+            layer.updateFields()
+            return {"ok": True, "old_name": old_name, "new_name": new_name}
+        else:
+            raise Exception(f"Failed to rename field: {old_name}")
+
+    def apply_style_qml(self, layer_id, path, **kwargs):
+        """Apply a QML style to a layer."""
+        project = QgsProject.instance()
+        layer = project.mapLayer(layer_id)
+        if not layer:
+            raise Exception(f"Layer not found: {layer_id}")
+
+        message, success = layer.loadNamedStyle(path)
+        if success:
+            layer.triggerRepaint()
+            self.iface.layerTreeView().refreshLayerSymbology(layer.id())
+            return {"ok": True, "message": message}
+        else:
+            raise Exception(f"Failed to apply style: {message}")
+
+    def save_style_qml(self, layer_id, path, **kwargs):
+        """Save a layer's style to a QML file."""
+        project = QgsProject.instance()
+        layer = project.mapLayer(layer_id)
+        if not layer:
+            raise Exception(f"Layer not found: {layer_id}")
+
+        message, success = layer.saveNamedStyle(path)
+        if success:
+            return {"ok": True, "path": path}
+        else:
+            raise Exception(f"Failed to save style: {message}")
+
+    def create_layout(self, name, **kwargs):
+        """Create a new print layout."""
+        project = QgsProject.instance()
+        layout = QgsPrintLayout(project)
+        layout.initializeDefaults()
+        layout.setName(name)
+        project.layoutManager().addLayout(layout)
+        return {"ok": True, "name": name}
+
+    def add_layout_map(self, layout_name, x, y, width, height, **kwargs):
+        """Add a map item to a print layout."""
+        manager = QgsProject.instance().layoutManager()
+        layout = manager.layoutByName(layout_name)
+        if not layout:
+            raise Exception(f"Layout not found: {layout_name}")
+
+        map_item = QgsLayoutItemMap(layout)
+        map_item.attemptMove(QgsLayoutPoint(x, y))
+        map_item.attemptResize(QgsLayoutSize(width, height))
+        map_item.zoomToExtent(self.iface.mapCanvas().extent())
+        layout.addLayoutItem(map_item)
+        return {"ok": True}
 
 
 class QgisMCPPlugin:
