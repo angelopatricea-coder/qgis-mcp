@@ -2,7 +2,7 @@
 """Multi-client installer for QGIS MCP.
 
 Symlinks the QGIS plugin and configures MCP clients (Claude Desktop,
-Cursor, VS Code Copilot, Windsurf, Zed, Claude Code).
+Cursor, VS Code Copilot, Windsurf, Zed, Claude Code, Codex CLI).
 
 Usage:
     python install.py                          # Interactive menu
@@ -68,7 +68,7 @@ def _client_registry() -> dict[str, ClientInfo]:
         claude_cfg = home / ".config" / "Claude" / "claude_desktop_config.json"
 
     cursor_cfg = home / ".cursor" / "mcp.json"
-    windsurf_cfg = home / ".windsurf" / "mcp.json"
+    windsurf_cfg = home / ".codeium" / "windsurf" / "mcp_config.json"
     vscode_cfg = REPO_DIR / ".vscode" / "mcp.json"
 
     if sys.platform == "darwin":
@@ -84,7 +84,8 @@ def _client_registry() -> dict[str, ClientInfo]:
         "vscode": {"path": vscode_cfg, "key": "mcpServers", "project_local": True},
         "windsurf": {"path": windsurf_cfg, "key": "mcpServers"},
         "zed": {"path": zed_cfg, "key": "context_servers"},
-        "claude-code": {"print_only": True},
+        "claude-code": {"print_only": True, "cli": "claude"},
+        "codex": {"print_only": True, "cli": "codex"},
     }
 
 
@@ -260,11 +261,12 @@ def configure_client(client_name: str, remote: bool) -> None:
     registry = _client_registry()
     info = registry[client_name]
 
-    # Claude Code: use `claude mcp` CLI
+    # CLI-based clients (Claude Code, Codex): use their `mcp add` subcommand
     if info.get("print_only"):
-        claude_bin = shutil.which("claude")
-        if not claude_bin:
-            print("  'claude' CLI not found in PATH – skipping.")
+        cli_name = info.get("cli", "claude")
+        cli_bin = shutil.which(cli_name)
+        if not cli_bin:
+            print(f"  '{cli_name}' CLI not found in PATH – skipping.")
             return
 
         if remote:
@@ -278,20 +280,35 @@ def configure_client(client_name: str, remote: bool) -> None:
         else:
             add_args = [str(_venv_python()), str(REPO_DIR / "src" / "qgis_mcp" / "server.py")]
 
-        # Remove existing entry first (ignore errors if not present)
-        subprocess.run(
-            [claude_bin, "mcp", "remove", "-s", "user", "qgis"],
-            capture_output=True,
-        )
-        result = subprocess.run(
-            [claude_bin, "mcp", "add", "-s", "user", "qgis", "--"] + add_args,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            print("  Configured Claude Code (user scope).")
+        if cli_name == "claude":
+            # Claude Code supports scoped installs; use user scope for QGIS (global tool)
+            subprocess.run(
+                [cli_bin, "mcp", "remove", "-s", "user", "qgis"],
+                capture_output=True,
+            )
+            result = subprocess.run(
+                [cli_bin, "mcp", "add", "-s", "user", "qgis", "--"] + add_args,
+                capture_output=True,
+                text=True,
+            )
+            label = "Claude Code (user scope)"
         else:
-            print(f"  Failed to configure Claude Code: {result.stderr.strip()}")
+            # Codex CLI: `codex mcp add <name> -- <cmd> [args...]`
+            subprocess.run(
+                [cli_bin, "mcp", "remove", "qgis"],
+                capture_output=True,
+            )
+            result = subprocess.run(
+                [cli_bin, "mcp", "add", "qgis", "--"] + add_args,
+                capture_output=True,
+                text=True,
+            )
+            label = "Codex CLI"
+
+        if result.returncode == 0:
+            print(f"  Configured {label}.")
+        else:
+            print(f"  Failed to configure {label}: {result.stderr.strip()}")
         return
 
     path = Path(info["path"])
@@ -313,19 +330,24 @@ def unconfigure_client(client_name: str) -> None:
     info = registry[client_name]
 
     if info.get("print_only"):
-        claude_bin = shutil.which("claude")
-        if not claude_bin:
-            print("  'claude' CLI not found in PATH – skipping.")
+        cli_name = info.get("cli", "claude")
+        cli_bin = shutil.which(cli_name)
+        if not cli_bin:
+            print(f"  '{cli_name}' CLI not found in PATH – skipping.")
             return
-        result = subprocess.run(
-            [claude_bin, "mcp", "remove", "-s", "user", "qgis"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            print("  Removed qgis from Claude Code.")
+
+        if cli_name == "claude":
+            remove_cmd = [cli_bin, "mcp", "remove", "-s", "user", "qgis"]
+            label = "Claude Code"
         else:
-            print(f"  Not configured in Claude Code: {result.stderr.strip()}")
+            remove_cmd = [cli_bin, "mcp", "remove", "qgis"]
+            label = "Codex CLI"
+
+        result = subprocess.run(remove_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"  Removed qgis from {label}.")
+        else:
+            print(f"  Not configured in {label}: {result.stderr.strip()}")
         return
 
     path = Path(info["path"])
@@ -345,7 +367,7 @@ def unconfigure_client(client_name: str) -> None:
 
 # ── Interactive menu ────────────────────────────────────────────────────────
 
-ALL_CLIENTS = ["claude-desktop", "cursor", "vscode", "windsurf", "zed", "claude-code"]
+ALL_CLIENTS = ["claude-desktop", "cursor", "vscode", "windsurf", "zed", "claude-code", "codex"]
 
 
 def interactive_menu() -> list[str]:

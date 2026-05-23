@@ -2,7 +2,7 @@
 
 Connect [QGIS](https://qgis.org/) to [Claude AI](https://claude.ai/) through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), enabling Claude to directly control QGIS — manage layers, edit features, run processing algorithms, render maps, and more.
 
-51 MCP tools covering layer management, feature editing, processing, rendering, styling, plugin development, and system management. Compatible with QGIS 3.28–4.x. Includes a one-command installer for 6+ MCP clients.
+51 MCP tools covering layer management, feature editing, processing, rendering, styling, plugin development, and system management. Compatible with QGIS 3.28–4.x. Includes a one-command installer for Claude Desktop, Claude Code, Codex CLI, Cursor, VS Code Copilot, Windsurf, and Zed.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ python install.py
 
 This will:
 - Symlink the QGIS plugin into your QGIS profile
-- Configure your MCP client(s) — supports Claude Desktop, Claude Code, Cursor, VS Code Copilot, Windsurf, and Zed
+- Configure your MCP client(s) — supports Claude Desktop, Claude Code, Codex CLI, Cursor, VS Code Copilot, Windsurf, and Zed
 
 Options: `--non-interactive --clients claude-desktop,cursor` for CI, `--remote` for uvx-based installs, `--profile myprofile` for non-default QGIS profiles, `--uninstall` to remove.
 
@@ -66,53 +66,80 @@ Restart QGIS, then enable the plugin: `Plugins` > `Manage and Install Plugins` >
 
 #### Connect your MCP client manually
 
-##### Claude Code — project-level config (recommended)
+##### Claude Code — project-level (recommended)
 
-Create a `.mcp.json` file at the root of your clone:
+A `.mcp.json` is already included at the root of this repo. Claude Code detects it automatically when you open the project — no extra setup needed.
 
-```json
-{
-  "mcpServers": {
-    "qgis": {
-      "command": "uv",
-      "args": ["run", "src/qgis_mcp/server.py"],
-      "cwd": "/path/to/qgis-mcp"
-    }
-  }
-}
-```
-
-Claude Code automatically detects `.mcp.json` when you open the project — no manual `claude mcp add` needed.
-
-##### Claude Code — user-scope (works from any project)
+To add it to a different project, or to install at user scope (available everywhere):
 
 ```bash
+# User scope — works from any directory
 claude mcp add -s user qgis -- uv run --no-sync --directory /path/to/qgis-mcp src/qgis_mcp/server.py
-```
 
-##### Claude Code — remote install (no local clone needed)
-
-```bash
+# Remote — no local clone needed
 claude mcp add -s user qgis -- uvx --from git+https://github.com/nkarasiak/qgis-mcp qgis-mcp-server
 ```
 
-##### Claude Desktop
+Scope reference:
 
-Go to `Claude` > `Settings` > `Developer` > `Edit Config` and add:
+| Flag | Stored in | Visible to |
+|------|-----------|-----------|
+| `-s local` (default) | `.mcp.json` (gitignored) | You, this project |
+| `-s project` | `.mcp.json` (committed) | Whole team, this project |
+| `-s user` | `~/.claude.json` | You, every project |
+
+##### Codex CLI (OpenAI)
+
+```bash
+# Local clone
+codex mcp add qgis -- uv run --no-sync --directory /path/to/qgis-mcp src/qgis_mcp/server.py
+
+# Remote
+codex mcp add qgis -- uvx --from git+https://github.com/nkarasiak/qgis-mcp qgis-mcp-server
+```
+
+Or edit `~/.codex/config.toml` directly:
+
+```toml
+[mcp_servers.qgis]
+command = "uvx"
+args = ["--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"]
+```
+
+##### Gemini CLI
+
+Add to `~/.gemini/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "qgis": {
-      "command": "uv",
-      "args": ["run", "src/qgis_mcp/server.py"],
-      "cwd": "/path/to/qgis-mcp"
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"]
     }
   }
 }
 ```
 
-Or for a remote install without cloning:
+##### opencode (sst/opencode)
+
+Add to `opencode.json` at your project root:
+
+```json
+{
+  "mcp": {
+    "qgis": {
+      "type": "local",
+      "command": ["uvx", "--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"],
+      "enabled": true
+    }
+  }
+}
+```
+
+##### Claude Desktop and other clients
+
+Go to `Claude` > `Settings` > `Developer` > `Edit Config` and add the standard JSON block. The same format works for Cursor (`~/.cursor/mcp.json`), VS Code (`.vscode/mcp.json`), Windsurf (`~/.codeium/windsurf/mcp_config.json`), and most other MCP clients:
 
 ```json
 {
@@ -127,10 +154,6 @@ Or for a remote install without cloning:
   }
 }
 ```
-
-##### Cursor / other MCP clients
-
-Use the same JSON configuration above in your client's MCP settings file.
 
 </details>
 
