@@ -2710,7 +2710,7 @@ class MCPConfiguratorDialog(QDialog):
 
     def update_preview(self):
         client = self.client_combo.currentText()
-        remote = self.mode_combo.currentText() == "Remote (uvx)"
+        remote = self.mode_combo.currentText().startswith("Remote")
         info = self._get_client_info(client)
 
         if info.get("print_only"):
@@ -2767,7 +2767,7 @@ class MCPConfiguratorDialog(QDialog):
 
     def run_config(self):
         client = self.client_combo.currentText()
-        remote = self.mode_combo.currentText() == "Remote (uvx)"
+        remote = self.mode_combo.currentText().startswith("Remote")
         info = self._get_client_info(client)
 
         if info.get("print_only"):
