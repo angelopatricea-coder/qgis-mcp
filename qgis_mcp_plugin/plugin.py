@@ -7,7 +7,6 @@ import os
 import shutil
 import socket
 import struct
-import subprocess
 import sys
 import traceback
 from collections import deque
@@ -2509,9 +2508,13 @@ class MCPConfiguratorDialog(QDialog):
                 try:
                     target.symlink_to(plugin_src, target_is_directory=True)
                 except OSError:
-                    subprocess.run(
-                        f'mklink /J "{target}" "{plugin_src}"', shell=True, check=True
+                    QgsMessageLog.logMessage(
+                        "Symlink requires Developer Mode or admin on Windows. "
+                        "Run 'python install.py' from the repository root instead.",
+                        "MCP",
+                        MSG_WARNING,
                     )
+                    return
             else:
                 target.symlink_to(plugin_src)
             QgsMessageLog.logMessage(f"Linked plugin: {target} -> {plugin_src}", "MCP", MSG_INFO)
