@@ -2920,30 +2920,56 @@ class QgisMCPPlugin:
         QTimer.singleShot(1000, self._proactive_setup_check)
 
     def _proactive_setup_check(self):
-        """Check if setup is needed and show a welcome message."""
+        """Show a welcome dialog on first install."""
         settings = QgsSettings()
         first_run = settings.value(f"{self.SETTINGS_PREFIX}/first_run", True, type=bool)
-        
-        # Check link status
-        repo_dir = Path(__file__).resolve().parent.parent
-        plugins_dir = Path(QgsApplication.qgisSettingsDirPath()) / "python" / "plugins"
-        target = plugins_dir / "qgis_mcp_plugin"
-        is_linked = target.is_symlink() and target.resolve() == (repo_dir / "qgis_mcp_plugin").resolve()
+        if not first_run:
+            return
+        settings.setValue(f"{self.SETTINGS_PREFIX}/first_run", False)
 
-        if first_run or not is_linked:
-            msg = "Welcome to QGIS MCP! It looks like you might need to complete the setup."
-            if not is_linked:
-                msg = "QGIS MCP plugin is not linked to your repository. Some features might not work."
-            
-            self.iface.messageBar().pushMessage(
-                "QGIS MCP",
-                f"{msg} Open the 'MCP Setup & Configurator' to get started.",
-                level=Qgis.Info,
-                duration=10
-            )
-            
-            if first_run:
-                settings.setValue(f"{self.SETTINGS_PREFIX}/first_run", False)
+        dlg = QDialog(self.iface.mainWindow())
+        dlg.setWindowTitle("Welcome to QGIS MCP")
+        dlg.setMinimumWidth(420)
+        layout = QVBoxLayout(dlg)
+
+        title = QLabel("<h2>QGIS MCP installed!</h2>")
+        layout.addWidget(title)
+
+        body = QLabel(
+            "<p>This plugin lets Claude (and other LLMs) control QGIS directly "
+            "via the Model Context Protocol.</p>"
+            "<p><b>Quick start:</b></p>"
+            "<ol>"
+            "<li>Click the MCP toolbar icon → <b>Start Server</b></li>"
+            "<li>Open <b>Configure…</b> in the same menu to connect your AI client</li>"
+            "<li>Ask Claude to work with your QGIS project</li>"
+            "</ol>"
+        )
+        body.setWordWrap(True)
+        body.setOpenExternalLinks(True)
+        layout.addWidget(body)
+
+        layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        github_btn = QPushButton("Open GitHub")
+        github_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://github.com/nkarasiak/qgis-mcp"))
+        )
+        configure_btn = QPushButton("Open Configurator")
+        configure_btn.clicked.connect(dlg.accept)
+        configure_btn.clicked.connect(self._show_help)
+        configure_btn.setDefault(True)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.reject)
+
+        btn_layout.addWidget(github_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        btn_layout.addWidget(configure_btn)
+        layout.addLayout(btn_layout)
+
+        dlg.exec()
 
     def _save_autostart(self, checked):
         """Persist auto-start preference."""
