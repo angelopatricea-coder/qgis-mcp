@@ -86,7 +86,6 @@ from qgis.PyQt.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
-    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -2404,83 +2403,98 @@ class MCPConfiguratorDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        self.tabs = QTabWidget()
+        layout.setSpacing(10)
 
-        # Tab 1: Guide
-        self.guide_tab = QWidget()
-        self.init_guide_tab()
-        self.tabs.addTab(self.guide_tab, "Guide")
+        # ── Client selector ──────────────────────────────────────────
+        client_row = QHBoxLayout()
+        client_row.addWidget(QLabel("AI client:"))
+        self.client_combo = QComboBox()
+        self.client_combo.addItems(
+            ["claude-desktop", "cursor", "vscode", "windsurf", "zed", "claude-code"]
+        )
+        self.client_combo.setMinimumWidth(180)
+        self.client_combo.currentTextChanged.connect(self._on_client_changed)
+        client_row.addWidget(self.client_combo)
 
-        # Tab 2: Auto-Config
-        self.config_tab = QWidget()
-        self.init_config_tab()
-        self.tabs.addTab(self.config_tab, "Auto-Config")
+        # Mode selector — only relevant for dev installs with a local clone
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Remote (uvx — recommended)", "Local (uv run)"])
+        self.mode_combo.setToolTip(
+            "Remote: install MCP server on-the-fly via uvx (no clone needed).\n"
+            "Local: run MCP server from your git clone via uv."
+        )
+        self.mode_combo.currentTextChanged.connect(self._on_client_changed)
+        self.mode_combo.setVisible(self._is_dev_install())
+        client_row.addWidget(self.mode_combo)
+        client_row.addStretch()
+        layout.addLayout(client_row)
 
-        layout.addWidget(self.tabs)
+        # ── Preview area ─────────────────────────────────────────────
+        self.preview_label = QLabel("Add to your client config file:")
+        layout.addWidget(self.preview_label)
 
-        # Bottom Buttons
-        btn_layout = QHBoxLayout()
-        self.github_btn = QPushButton("Open GitHub")
-        self.github_btn.clicked.connect(
+        preview_row = QHBoxLayout()
+        self.preview_edit = QPlainTextEdit()
+        self.preview_edit.setReadOnly(True)
+        self.preview_edit.setMaximumHeight(160)
+        preview_row.addWidget(self.preview_edit)
+
+        copy_col = QVBoxLayout()
+        self.copy_btn = QPushButton("Copy")
+        self.copy_btn.setFixedWidth(60)
+        self.copy_btn.clicked.connect(self._copy_preview)
+        copy_col.addWidget(self.copy_btn)
+        copy_col.addStretch()
+        preview_row.addLayout(copy_col)
+        layout.addLayout(preview_row)
+
+        # ── Status + actions ─────────────────────────────────────────
+        self.status_label = QLabel()
+        layout.addWidget(self.status_label)
+
+        action_row = QHBoxLayout()
+        self.apply_btn = QPushButton("Apply Config")
+        self.apply_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 5px 14px; }"
+            "QPushButton:disabled { background-color: #aaa; }"
+        )
+        self.apply_btn.clicked.connect(self.run_config)
+        action_row.addWidget(self.apply_btn)
+        action_row.addStretch()
+        github_btn = QPushButton("Open GitHub")
+        github_btn.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl("https://github.com/nkarasiak/qgis-mcp"))
         )
-        btn_layout.addWidget(self.github_btn)
-        btn_layout.addStretch()
-        self.close_btn = QPushButton("Close")
-        self.close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(self.close_btn)
-        layout.addLayout(btn_layout)
+        action_row.addWidget(github_btn)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        action_row.addWidget(close_btn)
+        layout.addLayout(action_row)
 
-    def init_guide_tab(self):
-        layout = QVBoxLayout(self.guide_tab)
-        text = (
-            "<h2>QGIS MCP Setup Guide</h2>"
-            "<p>This plugin enables QGIS to be controlled by LLMs via the Model Context Protocol (MCP).</p>"
-            "<ol>"
-            "<li><b>Start the Server:</b> Click the MCP icon in the toolbar to start the TCP server inside QGIS.</li>"
-            "<li><b>Configure Client:</b> Use the 'Auto-Config' tab to add QGIS to your favorite LLM client.</li>"
-            "<li><b>Dependencies:</b> Ensure <code>uv</code> is installed on your system for best experience.</li>"
-            "</ol>"
-        )
-        self.guide_label = QLabel(text)
-        self.guide_label.setWordWrap(True)
-        self.guide_label.setOpenExternalLinks(True)
-        layout.addWidget(self.guide_label)
-
-        # Health Checklist Group
-        self.checklist_group = QGroupBox("Health Checklist")
+        # ── Dev-only health checklist ─────────────────────────────────
+        self.checklist_group = QGroupBox("Development environment")
         checklist_layout = QVBoxLayout()
-
-        self.status_link = QLabel("Plugin Link Status: Checking...")
-        self.status_uv = QLabel("uv Installation: Checking...")
-        self.status_venv = QLabel("Python Venv Ready: Checking...")
-        self.status_entry = QLabel("MCP Server Entry Point: Checking...")
-
-        checklist_layout.addWidget(self.status_link)
-        checklist_layout.addWidget(self.status_uv)
-        checklist_layout.addWidget(self.status_venv)
-        checklist_layout.addWidget(self.status_entry)
-
-        # Checklist Buttons
-        check_btn_layout = QHBoxLayout()
-        self.refresh_check_btn = QPushButton("Refresh Checklist")
+        self.status_link = QLabel()
+        self.status_uv = QLabel()
+        self.status_venv = QLabel()
+        self.status_entry = QLabel()
+        for lbl in (self.status_link, self.status_uv, self.status_venv, self.status_entry):
+            checklist_layout.addWidget(lbl)
+        dev_btn_row = QHBoxLayout()
+        self.refresh_check_btn = QPushButton("Refresh")
         self.refresh_check_btn.clicked.connect(self.refresh_checklist)
-        check_btn_layout.addWidget(self.refresh_check_btn)
-
         self.setup_env_btn = QPushButton("Setup Environment")
+        self.setup_env_btn.setToolTip("Run 'uv sync' in the repository")
         self.setup_env_btn.clicked.connect(self.setup_environment)
-        self.setup_env_btn.setToolTip("Run 'uv sync' or 'pip install -e .' in the repository")
-        check_btn_layout.addWidget(self.setup_env_btn)
-
-        checklist_layout.addLayout(check_btn_layout)
-        self.checklist_group.setLayout(checklist_layout)
-        layout.addWidget(self.checklist_group)
-
-        self.relink_btn = QPushButton("Ensure Plugin is Linked (Symlink)")
+        self.relink_btn = QPushButton("Re-link Plugin")
         self.relink_btn.clicked.connect(self.relink_plugin)
-        layout.addWidget(self.relink_btn)
-
-        layout.addStretch()
+        dev_btn_row.addWidget(self.refresh_check_btn)
+        dev_btn_row.addWidget(self.setup_env_btn)
+        dev_btn_row.addWidget(self.relink_btn)
+        checklist_layout.addLayout(dev_btn_row)
+        self.checklist_group.setLayout(checklist_layout)
+        self.checklist_group.setVisible(self._is_dev_install())
+        layout.addWidget(self.checklist_group)
 
     def _is_dev_install(self):
         """True when the plugin is running from a git-cloned repository."""
@@ -2611,54 +2625,13 @@ class MCPConfiguratorDialog(QDialog):
         self.refresh_checklist()
         self.setup_process = None
 
-    def init_config_tab(self):
-        layout = QVBoxLayout(self.config_tab)
+    def _on_client_changed(self):
+        self.refresh_status()
 
-        # Client selection
-        client_layout = QHBoxLayout()
-        client_layout.addWidget(QLabel("MCP Client:"))
-        self.client_combo = QComboBox()
-        self.client_combo.addItems(
-            ["claude-desktop", "cursor", "vscode", "windsurf", "zed", "claude-code"]
-        )
-        self.client_combo.currentTextChanged.connect(self.update_preview)
-        client_layout.addWidget(self.client_combo)
-        layout.addLayout(client_layout)
-
-        # Mode selection
-        mode_layout = QHBoxLayout()
-        mode_layout.addWidget(QLabel("Mode:"))
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Local (uv run)", "Remote (uvx)"])
-        self.mode_combo.currentTextChanged.connect(self.update_preview)
-        mode_layout.addWidget(self.mode_combo)
-        layout.addLayout(mode_layout)
-
-        # Status Label
-        self.status_label = QLabel("Status: Unknown")
-        self.status_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(self.status_label)
-
-        # Preview
-        layout.addWidget(QLabel("Config Preview:"))
-        self.preview_edit = QPlainTextEdit()
-        self.preview_edit.setReadOnly(True)
-        # Use a fixed-width font for JSON
-        layout.addWidget(self.preview_edit)
-
-        # Buttons
-        h_btn_layout = QHBoxLayout()
-        self.refresh_btn = QPushButton("Refresh Status")
-        self.refresh_btn.clicked.connect(self.refresh_status)
-        h_btn_layout.addWidget(self.refresh_btn)
-
-        self.config_btn = QPushButton("Configure")
-        self.config_btn.clicked.connect(self.run_config)
-        self.config_btn.setStyleSheet(
-            "background-color: #4CAF50; color: white; font-weight: bold;"
-        )
-        h_btn_layout.addWidget(self.config_btn)
-        layout.addLayout(h_btn_layout)
+    def _copy_preview(self):
+        QgsApplication.clipboard().setText(self.preview_edit.toPlainText())
+        self.copy_btn.setText("Copied!")
+        QTimer.singleShot(1500, lambda: self.copy_btn.setText("Copy"))
 
     def _get_client_info(self, client_name):
         home = Path.home()
@@ -2749,9 +2722,11 @@ class MCPConfiguratorDialog(QDialog):
                     f'claude mcp add -s user qgis -- '
                     f'"{uv}" --directory "{self.repo_dir}" run --no-sync src/qgis_mcp/server.py'
                 )
-            self.preview_edit.setPlainText(f"Run this command in your terminal:\n\n{cmd}")
+            self.preview_label.setText("Run this command in your terminal:")
+            self.preview_edit.setPlainText(cmd)
             return
 
+        self.preview_label.setText("Add to your client config file:")
         entry = self._get_server_entry(client, remote)
         self.preview_edit.setPlainText(json.dumps({"qgis": entry}, indent=2))
 
@@ -2760,10 +2735,13 @@ class MCPConfiguratorDialog(QDialog):
         info = self._get_client_info(client)
 
         if info.get("print_only"):
-            self.status_label.setText("Status: N/A (Manual command)")
+            self.status_label.setText("Run the command above in your terminal.")
             self.status_label.setStyleSheet("color: gray;")
+            self.apply_btn.setEnabled(False)
             self.update_preview()
             return
+
+        self.apply_btn.setEnabled(True)
 
         path = info["path"]
         key = info["key"]
