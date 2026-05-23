@@ -82,7 +82,6 @@ from qgis.PyQt.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMenu,
     QPlainTextEdit,
     QPushButton,
@@ -261,8 +260,8 @@ class QgisMCPServer(QObject):
                                 raise ValueError(f"Message too large: {msg_len} bytes")
                             if len(buf) < 4 + msg_len:
                                 break  # Incomplete message
-                            msg_bytes = buf[4 : 4 + msg_len]
-                            buf = buf[4 + msg_len :]
+                            msg_bytes = buf[4:4 + msg_len]
+                            buf = buf[4 + msg_len:]
                             try:
                                 command = json.loads(msg_bytes.decode("utf-8"))
                             except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -620,7 +619,7 @@ class QgisMCPServer(QObject):
         project = QgsProject.instance()
         all_layers = list(project.mapLayers().items())
         total_count = len(all_layers)
-        page = all_layers[offset : offset + limit]
+        page = all_layers[offset:offset + limit]
 
         layers = []
         for layer_id, layer in page:
