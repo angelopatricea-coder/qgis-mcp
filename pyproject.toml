@@ -5,6 +5,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/qgis_mcp"]
 
+[tool.uv]
+package = true
+
 [project]
 name = "qgis-mcp"
 version = "0.3.0"

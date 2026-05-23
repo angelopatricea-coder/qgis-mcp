@@ -89,6 +89,12 @@ from .compat import (
     GEOM_POLYGON,
     IODEVICE_WRITEONLY,
     LAYER_RASTER,
+    QVAR_BOOL,
+    QVAR_DATE,
+    QVAR_DATETIME,
+    QVAR_DOUBLE,
+    QVAR_INT,
+    QVAR_STRING,
     LAYER_VECTOR,
     LAYOUT_SUCCESS,
     MSG_CRITICAL,
@@ -1885,14 +1891,14 @@ class QgisMCPServer(QObject):
         layer = self._get_vector_layer(layer_id)
 
         type_map = {
-            "string": QVariant.String,
-            "int": QVariant.Int,
-            "double": QVariant.Double,
-            "bool": QVariant.Bool,
-            "date": QVariant.Date,
-            "datetime": QVariant.DateTime,
+            "string": QVAR_STRING,
+            "int": QVAR_INT,
+            "double": QVAR_DOUBLE,
+            "bool": QVAR_BOOL,
+            "date": QVAR_DATE,
+            "datetime": QVAR_DATETIME,
         }
-        v_type = type_map.get(field_type.lower(), QVariant.String)
+        v_type = type_map.get(field_type.lower(), QVAR_STRING)
         field = QgsField(field_name, v_type, field_type, length or 0, precision or 0)
 
         if layer.dataProvider().addAttributes([field]):

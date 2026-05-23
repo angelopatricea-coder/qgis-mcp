@@ -28,6 +28,7 @@ tracker=https://github.com/nkarasiak/qgis-mcp/issues
 repository=https://github.com/nkarasiak/qgis-mcp
 license=MIT
 category=Plugins
+supportsQt6=yes
 icon=icons/icon.png
 experimental=False
 deprecated=False
