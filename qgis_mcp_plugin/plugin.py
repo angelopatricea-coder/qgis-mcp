@@ -2482,6 +2482,26 @@ class MCPConfiguratorDialog(QDialog):
 
         layout.addStretch()
 
+    def _is_dev_install(self):
+        """True when the plugin is running from a git-cloned repository."""
+        return (self.repo_dir / ".git").exists()
+
+    def _find_uv(self):
+        """Return uv executable path, checking common Windows install locations."""
+        uv = shutil.which("uv")
+        if uv:
+            return uv
+        if sys.platform == "win32":
+            candidates = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / "uv.exe",
+                Path(os.environ.get("USERPROFILE", "")) / ".local" / "bin" / "uv.exe",
+                Path(os.environ.get("USERPROFILE", "")) / ".cargo" / "bin" / "uv.exe",
+            ]
+            for p in candidates:
+                if p.exists():
+                    return str(p)
+        return None
+
     def _get_qgis_plugins_dir(self):
         """Get the plugins directory for the currently active QGIS profile."""
         return Path(QgsApplication.qgisSettingsDirPath()) / "python" / "plugins"
@@ -2524,15 +2544,20 @@ class MCPConfiguratorDialog(QDialog):
     def refresh_checklist(self):
         """Update the health checklist labels."""
         # 1. Plugin Link Status
-        plugins_dir = self._get_qgis_plugins_dir()
-        target = plugins_dir / "qgis_mcp_plugin"
-        is_linked = target.is_symlink() and target.resolve() == (self.repo_dir / "qgis_mcp_plugin").resolve()
-        
-        self.status_link.setText(f"Plugin Link Status: {'✅ (linked)' if is_linked else '❌ (not linked)'}")
-        self.status_link.setStyleSheet(f"color: {'green' if is_linked else 'red'};")
+        if self._is_dev_install():
+            plugins_dir = self._get_qgis_plugins_dir()
+            target = plugins_dir / "qgis_mcp_plugin"
+            is_linked = target.is_symlink() and target.resolve() == (self.repo_dir / "qgis_mcp_plugin").resolve()
+            self.status_link.setText(f"Plugin Link Status: {'✅ (linked)' if is_linked else '❌ (not linked)'}")
+            self.status_link.setStyleSheet(f"color: {'green' if is_linked else 'red'};")
+            self.relink_btn.setVisible(True)
+        else:
+            self.status_link.setText("Plugin Link Status: ✅ (Plugin Manager install)")
+            self.status_link.setStyleSheet("color: green;")
+            self.relink_btn.setVisible(False)
 
         # 2. uv Installation
-        has_uv = bool(shutil.which("uv"))
+        has_uv = bool(self._find_uv())
         self.status_uv.setText(f"uv Installation: {'✅ (found)' if has_uv else '❌ (missing)'}")
         self.status_uv.setStyleSheet(f"color: {'green' if has_uv else 'red'};")
 
@@ -2551,9 +2576,9 @@ class MCPConfiguratorDialog(QDialog):
         if self.setup_process and self.setup_process.state() == QProcess.Running:
             return
 
-        has_uv = bool(shutil.which("uv"))
-        cmd = "uv" if has_uv else "pip"
-        args = ["sync"] if has_uv else ["install", "-e", "."]
+        uv = self._find_uv()
+        cmd = uv if uv else "pip"
+        args = ["sync"] if uv else ["install", "-e", "."]
 
         self.setup_env_btn.setEnabled(False)
         self.setup_env_btn.setText("Setting up...")
@@ -2681,11 +2706,14 @@ class MCPConfiguratorDialog(QDialog):
                 "args": ["--from", self.github_url, "qgis-mcp-server"],
             }
         else:
-            if shutil.which("uv"):
+            uv = self._find_uv()
+            if uv:
                 entry = {
-                    "command": "uv",
-                    "args": ["run", "--no-sync", "src/qgis_mcp/server.py"],
-                    "cwd": str(self.repo_dir),
+                    "command": uv,
+                    "args": [
+                        "--directory", str(self.repo_dir),
+                        "run", "--no-sync", "src/qgis_mcp/server.py",
+                    ],
                 }
             else:
                 if sys.platform == "win32":
@@ -2716,15 +2744,12 @@ class MCPConfiguratorDialog(QDialog):
         if info.get("print_only"):
             if remote:
                 cmd = f'claude mcp add qgis -- uvx --from "{self.github_url}" qgis-mcp-server'
-            elif shutil.which("uv"):
-                cmd = f'cd "{self.repo_dir}" && claude mcp add qgis -- uv run --no-sync src/qgis_mcp/server.py'
             else:
-                py = (
-                    "Scripts\\python.exe" if sys.platform == "win32" else "bin/python"
+                uv = self._find_uv() or "uv"
+                cmd = (
+                    f'claude mcp add -s user qgis -- '
+                    f'"{uv}" --directory "{self.repo_dir}" run --no-sync src/qgis_mcp/server.py'
                 )
-                python = self.repo_dir / ".venv" / py
-                server = self.repo_dir / "src/qgis_mcp/server.py"
-                cmd = f'claude mcp add qgis -- "{python}" "{server}"'
             self.preview_edit.setPlainText(f"Run this command in your terminal:\n\n{cmd}")
             return
 
