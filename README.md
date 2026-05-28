@@ -29,8 +29,10 @@ Restart QGIS and click **Start Server** in the QGIS MCP dock widget.
 <summary>Claude Code</summary>
 
 ```bash
-claude mcp add -s user qgis -- uvx --from git+https://github.com/nkarasiak/qgis-mcp qgis-mcp-server
+claude mcp add -s user qgis -- uvx --refresh-package qgis-mcp --from git+https://github.com/nkarasiak/qgis-mcp qgis-mcp-server
 ```
+
+`--refresh-package qgis-mcp` makes uvx re-pull the latest server from GitHub on every launch so it stays in sync with the QGIS plugin. Drop it to pin to the cached version (faster start, manual updates).
 
 Scope reference:
 
@@ -46,7 +48,7 @@ Scope reference:
 <summary>Codex CLI</summary>
 
 ```bash
-codex mcp add qgis -- uvx --from git+https://github.com/nkarasiak/qgis-mcp qgis-mcp-server
+codex mcp add qgis -- uvx --refresh-package qgis-mcp --from git+https://github.com/nkarasiak/qgis-mcp qgis-mcp-server
 ```
 
 Or edit `~/.codex/config.toml` directly:
@@ -54,7 +56,7 @@ Or edit `~/.codex/config.toml` directly:
 ```toml
 [mcp_servers.qgis]
 command = "uvx"
-args = ["--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"]
+args = ["--refresh-package", "qgis-mcp", "--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"]
 ```
 
 </details>
@@ -69,7 +71,7 @@ Add to `~/.gemini/settings.json`:
   "mcpServers": {
     "qgis": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"]
+      "args": ["--refresh-package", "qgis-mcp", "--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"]
     }
   }
 }
@@ -87,7 +89,7 @@ Add to `opencode.json` at your project root:
   "mcp": {
     "qgis": {
       "type": "local",
-      "command": ["uvx", "--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"],
+      "command": ["uvx", "--refresh-package", "qgis-mcp", "--from", "git+https://github.com/nkarasiak/qgis-mcp", "qgis-mcp-server"],
       "enabled": true
     }
   }
@@ -107,6 +109,7 @@ Add to your client's MCP config file:
     "qgis": {
       "command": "uvx",
       "args": [
+        "--refresh-package", "qgis-mcp",
         "--from", "git+https://github.com/nkarasiak/qgis-mcp",
         "qgis-mcp-server"
       ]
@@ -141,7 +144,9 @@ The plugin (inside QGIS) and the MCP server (outside QGIS) must stay in sync —
 | Component | Remote install | Local install (`git clone`) |
 |-----------|---------------|----------------------------|
 | **QGIS plugin** | `Plugins` > `Manage and Install Plugins` > Update | Same — Plugin Manager picks up the new version from QGIS Hub |
-| **MCP server** | Automatic — `uvx` fetches latest on next run | `git pull` then restart the MCP server process |
+| **MCP server** | With `--refresh-package qgis-mcp` in your config (see above), uvx re-pulls the latest on each client restart. Without it, uvx caches — force an update with `uvx --refresh-package qgis-mcp --from git+https://github.com/nkarasiak/qgis-mcp qgis-mcp-server` | `git pull` then restart the MCP server process |
+
+`uvx` caches the git checkout, so a plain config does **not** auto-update. The `--refresh-package qgis-mcp` flag in the configs above re-resolves only this package from GitHub on every launch (keeps the `mcp` dependency cached). Tradeoff: ~1–3s slower start and requires network at launch. Restart your MCP client to trigger the refresh.
 
 After updating the plugin, click **Stop / Start** in the QGIS MCP dock widget (or reload via `Plugins` > `QGIS MCP` > `Reload Plugin`) to load the new code without restarting QGIS.
 
