@@ -83,6 +83,7 @@ from qgis.PyQt.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -3103,6 +3104,84 @@ class QgisMCPServer(QObject):
         return {"output_layer_id": out.id(), "name": out.name()}
 
 
+def _client_config_registry(repo_dir):
+    """Map client name -> {path, key} (or {print_only}) for MCP config files.
+
+    Shared by the configurator dialog and the stale-config migration check.
+    """
+    home = Path.home()
+    appdata = (
+        Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+        if sys.platform == "win32"
+        else None
+    )
+
+    if sys.platform == "darwin":
+        claude_cfg = (
+            home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+        )
+    elif sys.platform == "win32":
+        claude_cfg = appdata / "Claude" / "claude_desktop_config.json"
+    else:
+        claude_cfg = home / ".config" / "Claude" / "claude_desktop_config.json"
+
+    cursor_cfg = home / ".cursor" / "mcp.json"
+    windsurf_cfg = home / ".windsurf" / "mcp.json"
+    vscode_cfg = repo_dir / ".vscode" / "mcp.json"
+
+    if sys.platform == "win32":
+        zed_cfg = appdata / "Zed" / "settings.json"
+    else:
+        zed_cfg = home / ".config" / "zed" / "settings.json"
+
+    return {
+        "claude-desktop": {"path": claude_cfg, "key": "mcpServers"},
+        "cursor": {"path": cursor_cfg, "key": "mcpServers"},
+        "vscode": {"path": vscode_cfg, "key": "mcpServers", "project_local": True},
+        "windsurf": {"path": windsurf_cfg, "key": "mcpServers"},
+        "zed": {"path": zed_cfg, "key": "context_servers"},
+        "claude-code": {"print_only": True},
+    }
+
+
+def _qgis_entry_command_args(entry):
+    """Return (command, args) for a 'qgis' server entry, handling the zed shape.
+
+    Zed nests {'command': {'path': ..., 'args': [...]}}; others use a flat
+    {'command': 'uvx', 'args': [...]}.
+    """
+    if not isinstance(entry, dict):
+        return None, []
+    cmd = entry.get("command")
+    if isinstance(cmd, dict):  # zed
+        return cmd.get("path"), cmd.get("args", [])
+    return cmd, entry.get("args", [])
+
+
+def _qgis_entry_is_stale(entry):
+    """True when a remote uvx 'qgis' entry lacks --refresh-package (won't auto-update)."""
+    command, args = _qgis_entry_command_args(entry)
+    if command != "uvx" or "qgis-mcp-server" not in args:
+        return False  # local mode / unknown — leave alone
+    return "--refresh-package" not in args
+
+
+def _add_refresh_to_entry(entry):
+    """Insert '--refresh-package qgis-mcp' before '--from' in a uvx 'qgis' entry."""
+    cmd = entry.get("command")
+    args = cmd.get("args", []) if isinstance(cmd, dict) else entry.get("args", [])
+    try:
+        idx = args.index("--from")
+    except ValueError:
+        idx = 0
+    args[idx:idx] = ["--refresh-package", "qgis-mcp"]
+    if isinstance(cmd, dict):
+        cmd["args"] = args
+    else:
+        entry["args"] = args
+    return entry
+
+
 class MCPConfiguratorDialog(QDialog):
     def __init__(self, iface, parent=None):
         super().__init__(parent)
@@ -3143,6 +3222,18 @@ class MCPConfiguratorDialog(QDialog):
         self.mode_combo.currentTextChanged.connect(self._on_client_changed)
         self.mode_combo.setVisible(self._is_dev_install())
         client_row.addWidget(self.mode_combo)
+
+        # Refresh toggle — adds `--refresh-package qgis-mcp` so uvx re-pulls the
+        # latest server from GitHub on every launch (remote mode only).
+        self.refresh_check = QCheckBox("Always pull latest")
+        self.refresh_check.setToolTip(
+            "Add --refresh-package qgis-mcp so uvx re-pulls the latest server from\n"
+            "GitHub on every client launch (stays in sync with the plugin).\n"
+            "Uncheck to pin to the cached version (faster start, manual updates)."
+        )
+        self.refresh_check.setChecked(True)
+        self.refresh_check.toggled.connect(self._on_client_changed)
+        client_row.addWidget(self.refresh_check)
         client_row.addStretch()
         layout.addLayout(client_row)
 
@@ -3351,48 +3442,16 @@ class MCPConfiguratorDialog(QDialog):
         QTimer.singleShot(1500, lambda: self.copy_btn.setText("Copy"))
 
     def _get_client_info(self, client_name):
-        home = Path.home()
-        appdata = (
-            Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
-            if sys.platform == "win32"
-            else None
-        )
+        return _client_config_registry(self.repo_dir).get(client_name)
 
-        if sys.platform == "darwin":
-            claude_cfg = (
-                home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-            )
-        elif sys.platform == "win32":
-            claude_cfg = appdata / "Claude" / "claude_desktop_config.json"
-        else:
-            claude_cfg = home / ".config" / "Claude" / "claude_desktop_config.json"
-
-        cursor_cfg = home / ".cursor" / "mcp.json"
-        windsurf_cfg = home / ".windsurf" / "mcp.json"
-        vscode_cfg = self.repo_dir / ".vscode" / "mcp.json"
-
-        if sys.platform == "darwin":
-            zed_cfg = home / ".config" / "zed" / "settings.json"
-        elif sys.platform == "win32":
-            zed_cfg = appdata / "Zed" / "settings.json"
-        else:
-            zed_cfg = home / ".config" / "zed" / "settings.json"
-
-        registry = {
-            "claude-desktop": {"path": claude_cfg, "key": "mcpServers"},
-            "cursor": {"path": cursor_cfg, "key": "mcpServers"},
-            "vscode": {"path": vscode_cfg, "key": "mcpServers", "project_local": True},
-            "windsurf": {"path": windsurf_cfg, "key": "mcpServers"},
-            "zed": {"path": zed_cfg, "key": "context_servers"},
-            "claude-code": {"print_only": True},
-        }
-        return registry.get(client_name)
-
-    def _get_server_entry(self, client, remote):
+    def _get_server_entry(self, client, remote, refresh=False):
         if remote:
+            args = ["--from", self.github_url, "qgis-mcp-server"]
+            if refresh:
+                args = ["--refresh-package", "qgis-mcp", *args]
             entry = {
                 "command": "uvx",
-                "args": ["--from", self.github_url, "qgis-mcp-server"],
+                "args": args,
             }
         else:
             uv = self._find_uv()
@@ -3428,11 +3487,15 @@ class MCPConfiguratorDialog(QDialog):
     def update_preview(self):
         client = self.client_combo.currentText()
         remote = self.mode_combo.currentText().startswith("Remote")
+        refresh = remote and self.refresh_check.isChecked()
+        # Refresh only applies to remote (uvx) mode.
+        self.refresh_check.setEnabled(remote)
         info = self._get_client_info(client)
 
         if info.get("print_only"):
             if remote:
-                cmd = f'claude mcp add qgis -- uvx --from "{self.github_url}" qgis-mcp-server'
+                refresh_flag = "--refresh-package qgis-mcp " if refresh else ""
+                cmd = f'claude mcp add qgis -- uvx {refresh_flag}--from "{self.github_url}" qgis-mcp-server'
             else:
                 uv = self._find_uv() or "uv"
                 cmd = (
@@ -3444,7 +3507,7 @@ class MCPConfiguratorDialog(QDialog):
             return
 
         self.preview_label.setText("Add to your client config file:")
-        entry = self._get_server_entry(client, remote)
+        entry = self._get_server_entry(client, remote, refresh)
         self.preview_edit.setPlainText(json.dumps({"qgis": entry}, indent=2))
 
     def refresh_status(self):
@@ -3485,6 +3548,7 @@ class MCPConfiguratorDialog(QDialog):
     def run_config(self):
         client = self.client_combo.currentText()
         remote = self.mode_combo.currentText().startswith("Remote")
+        refresh = remote and self.refresh_check.isChecked()
         info = self._get_client_info(client)
 
         if info.get("print_only"):
@@ -3492,7 +3556,7 @@ class MCPConfiguratorDialog(QDialog):
 
         path = info["path"]
         key = info["key"]
-        entry = self._get_server_entry(client, remote)
+        entry = self._get_server_entry(client, remote, refresh)
 
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -3613,6 +3677,7 @@ class QgisMCPPlugin:
 
         # Proactive Welcome / Setup check
         QTimer.singleShot(1000, self._proactive_setup_check)
+        QTimer.singleShot(1500, self._check_stale_mcp_configs)
 
     def _proactive_setup_check(self):
         """Show a welcome dialog on first install."""
@@ -3683,6 +3748,77 @@ class QgisMCPPlugin:
         """Show the MCP Setup & Configurator dialog."""
         dlg = MCPConfiguratorDialog(self.iface, self.iface.mainWindow())
         dlg.exec()
+
+    def _check_stale_mcp_configs(self):
+        """Offer (once) to add --refresh-package to existing no-refresh uvx configs.
+
+        Old users who configured before --refresh-package existed have a cached
+        uvx checkout that never auto-updates. Detect those entries and offer a
+        one-click rewrite so the server stays in sync with the plugin.
+        """
+        settings = QgsSettings()
+        if settings.value(f"{self.SETTINGS_PREFIX}/refresh_migration_prompted", False, type=bool):
+            return
+
+        repo_dir = Path(__file__).resolve().parent.parent
+        stale = []  # (client, path, key, data)
+        for client, info in _client_config_registry(repo_dir).items():
+            if info.get("print_only"):
+                continue
+            path = info["path"]
+            if not path.exists():
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+            entry = data.get(info["key"], {}).get("qgis")
+            if _qgis_entry_is_stale(entry):
+                stale.append((client, path, info["key"], data))
+
+        if not stale:
+            return  # nothing to migrate — stay silent
+
+        # Prompt once, regardless of choice.
+        settings.setValue(f"{self.SETTINGS_PREFIX}/refresh_migration_prompted", True)
+
+        clients = ", ".join(sorted({c for c, *_ in stale}))
+        box = QMessageBox(self.iface.mainWindow())
+        box.setWindowTitle("QGIS MCP — keep server up to date?")
+        box.setIcon(QMessageBox.Question)
+        box.setText(
+            f"Your MCP config for {clients} pins a cached version of the server "
+            "that does not auto-update."
+        )
+        box.setInformativeText(
+            "Add '--refresh-package qgis-mcp' so it re-pulls the latest from GitHub "
+            "on each launch (stays in sync with this plugin; ~1–3s slower start). "
+            "Restart your AI client afterwards to take effect."
+        )
+        update_btn = box.addButton("Update configs", QMessageBox.AcceptRole)
+        box.addButton("Not now", QMessageBox.RejectRole)
+        box.exec()
+
+        if box.clickedButton() is not update_btn:
+            return
+
+        updated = []
+        for client, path, key, data in stale:
+            _add_refresh_to_entry(data[key]["qgis"])
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+                updated.append(client)
+            except OSError as e:
+                QgsMessageLog.logMessage(
+                    f"Failed to update {client} config: {e}", "MCP", MSG_CRITICAL
+                )
+        if updated:
+            QgsMessageLog.logMessage(
+                f"Added --refresh-package to configs: {', '.join(updated)}", "MCP", MSG_INFO
+            )
 
     def toggle_server(self, checked):
         if checked:
