@@ -1666,6 +1666,183 @@ async def test_spatial_join_long_timeout(mock_connection):
     )
 
 
+# --- Phase 8: layout/atlas authoring, query & management tool tests ---
+
+
+def _ok(result):
+    return {"status": "success", "result": result}
+
+
+@pytest.mark.asyncio
+async def test_get_layout_info_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"items": [], "count": 0})
+    from qgis_mcp.server import get_layout_info
+
+    await get_layout_info(_make_ctx(), layout_name="Map1")
+    assert mock_connection.send_command.call_args[0][0] == "get_layout_info"
+    assert mock_connection.send_command.call_args[0][1] == {"layout_name": "Map1"}
+
+
+@pytest.mark.asyncio
+async def test_add_layout_label_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "uuid": "x"})
+    from qgis_mcp.server import add_layout_label
+
+    await add_layout_label(_make_ctx(), layout_name="Map1", text="Title", font_size=18)
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "add_layout_label"
+    assert params["text"] == "Title"
+    assert params["font_size"] == 18
+
+
+@pytest.mark.asyncio
+async def test_add_layout_legend_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "uuid": "x"})
+    from qgis_mcp.server import add_layout_legend
+
+    await add_layout_legend(_make_ctx(), layout_name="Map1", title="Key")
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "add_layout_legend"
+    assert params["title"] == "Key"
+
+
+@pytest.mark.asyncio
+async def test_add_layout_scalebar_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "uuid": "x"})
+    from qgis_mcp.server import add_layout_scalebar
+
+    await add_layout_scalebar(_make_ctx(), layout_name="Map1", style="Numeric")
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "add_layout_scalebar"
+    assert params["style"] == "Numeric"
+
+
+@pytest.mark.asyncio
+async def test_add_layout_picture_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "uuid": "x"})
+    from qgis_mcp.server import add_layout_picture
+
+    await add_layout_picture(_make_ctx(), layout_name="Map1", path="/logo.svg")
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "add_layout_picture"
+    assert params["path"] == "/logo.svg"
+
+
+@pytest.mark.asyncio
+async def test_add_layout_table_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "uuid": "x"})
+    from qgis_mcp.server import add_layout_table
+
+    await add_layout_table(_make_ctx(), layout_name="Map1", layer_id="L1", max_rows=5)
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "add_layout_table"
+    assert params["layer_id"] == "L1"
+    assert params["max_rows"] == 5
+
+
+@pytest.mark.asyncio
+async def test_configure_atlas_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "count": 3})
+    from qgis_mcp.server import configure_atlas
+
+    await configure_atlas(
+        _make_ctx(), layout_name="Map1", coverage_layer="L1", filter_expression="pop > 0"
+    )
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "configure_atlas"
+    assert params["coverage_layer"] == "L1"
+    assert params["filter_expression"] == "pop > 0"
+
+
+@pytest.mark.asyncio
+async def test_export_atlas_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "count": 3})
+    from qgis_mcp.server import export_atlas
+
+    await export_atlas(_make_ctx(), layout_name="Map1", output_path="/out.pdf")
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "export_atlas"
+    assert params["output_path"] == "/out.pdf"
+    assert mock_connection.send_command.call_args[1]["timeout"] == 60
+
+
+@pytest.mark.asyncio
+async def test_remove_layout_tool_confirms(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "removed": "Map1"})
+    from qgis_mcp.server import remove_layout
+
+    output = await remove_layout(_make_ctx(), layout_name="Map1")
+    assert output["ok"] is True
+    assert mock_connection.send_command.call_args[0][0] == "remove_layout"
+
+
+@pytest.mark.asyncio
+async def test_remove_layout_tool_fail_open(mock_connection):
+    # elicitation unsupported should still proceed (fail-open, like other destructive tools)
+    mock_connection.send_command.return_value = _ok({"ok": True, "removed": "Map1"})
+    from qgis_mcp.server import remove_layout
+
+    output = await remove_layout(_make_ctx(elicitation="unsupported"), layout_name="Map1")
+    assert output["ok"] is True
+    assert mock_connection.send_command.call_args[0][0] == "remove_layout"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"fields": ["a"], "rows": [], "count": 0})
+    from qgis_mcp.server import execute_sql
+
+    await execute_sql(_make_ctx(), query="select * from roads")
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "execute_sql"
+    assert params["query"] == "select * from roads"
+    assert mock_connection.send_command.call_args[1]["timeout"] == 60
+
+
+@pytest.mark.asyncio
+async def test_evaluate_expression_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"result": 42})
+    from qgis_mcp.server import evaluate_expression
+
+    output = await evaluate_expression(_make_ctx(), expression="1 + 41")
+    assert output["result"] == 42
+    assert mock_connection.send_command.call_args[0][0] == "evaluate_expression"
+
+
+@pytest.mark.asyncio
+async def test_identify_features_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"point": [1, 2], "results": []})
+    from qgis_mcp.server import identify_features
+
+    await identify_features(_make_ctx(), point=[1.0, 2.0], tolerance=5.0)
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "identify_features"
+    assert params["point"] == [1.0, 2.0]
+    assert params["tolerance"] == 5.0
+
+
+@pytest.mark.asyncio
+async def test_duplicate_layer_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "output_layer_id": "L2"})
+    from qgis_mcp.server import duplicate_layer
+
+    await duplicate_layer(_make_ctx(), layer_id="L1", new_name="copy")
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "duplicate_layer"
+    assert params == {"layer_id": "L1", "new_name": "copy"}
+
+
+@pytest.mark.asyncio
+async def test_set_layer_order_tool(mock_connection):
+    mock_connection.send_command.return_value = _ok({"ok": True, "order": ["L1", "L2"]})
+    from qgis_mcp.server import set_layer_order
+
+    await set_layer_order(_make_ctx(), layer_ids=["L1", "L2"])
+    cmd, params = mock_connection.send_command.call_args[0][:2]
+    assert cmd == "set_layer_order"
+    assert params == {"layer_ids": ["L1", "L2"]}
+
+
 def test_compound_tools_register():
     """Test that compound tools can be registered."""
     from qgis_mcp.compound_tools import register_compound_tools

@@ -388,6 +388,21 @@ class QgisMCPServer(QObject):
                 "field_calculator": self.field_calculator,
                 "get_unique_values": self.get_unique_values,
                 "spatial_join": self.spatial_join,
+                # Phase 8 — Layout/atlas authoring, query & management
+                "get_layout_info": self.get_layout_info,
+                "add_layout_label": self.add_layout_label,
+                "add_layout_legend": self.add_layout_legend,
+                "add_layout_scalebar": self.add_layout_scalebar,
+                "add_layout_picture": self.add_layout_picture,
+                "add_layout_table": self.add_layout_table,
+                "configure_atlas": self.configure_atlas,
+                "export_atlas": self.export_atlas,
+                "remove_layout": self.remove_layout,
+                "execute_sql": self.execute_sql,
+                "evaluate_expression": self.evaluate_expression,
+                "identify_features": self.identify_features,
+                "duplicate_layer": self.duplicate_layer,
+                "set_layer_order": self.set_layer_order,
             }
 
             handler = handlers.get(cmd_type)
@@ -2396,6 +2411,384 @@ class QgisMCPServer(QObject):
         map_item.zoomToExtent(self.iface.mapCanvas().extent())
         layout.addLayoutItem(map_item)
         return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # Layout & atlas authoring (extended)
+    # ------------------------------------------------------------------
+
+    def _get_layout(self, layout_name):
+        """Get a print layout by name or raise."""
+        layout = QgsProject.instance().layoutManager().layoutByName(layout_name)
+        if not layout:
+            raise Exception(f"Layout not found: {layout_name}")
+        return layout
+
+    def _find_layout_map(self, layout, map_item_id=None):
+        """Find a map item in a layout by id/uuid, else the first map item."""
+        maps = [it for it in layout.items() if isinstance(it, QgsLayoutItemMap)]
+        if not maps:
+            return None
+        if map_item_id:
+            for m in maps:
+                if m.id() == map_item_id or m.uuid() == map_item_id:
+                    return m
+        return maps[0]
+
+    def get_layout_info(self, layout_name, **kwargs):
+        """List items in a print layout (type, id, position, size)."""
+        layout = self._get_layout(layout_name)
+        items = []
+        for item in layout.items():
+            if not hasattr(item, "uuid"):
+                continue
+            try:
+                pos = item.positionWithUnits()
+                size = item.sizeWithUnits()
+                x, y = pos.x(), pos.y()
+                w, h = size.width(), size.height()
+            except Exception:
+                x = y = w = h = None
+            items.append(
+                {
+                    "id": item.id(),
+                    "uuid": item.uuid(),
+                    "type": type(item).__name__,
+                    "x": x,
+                    "y": y,
+                    "width": w,
+                    "height": h,
+                }
+            )
+        return {
+            "layout": layout_name,
+            "items": items,
+            "count": len(items),
+            "page_count": layout.pageCollection().pageCount(),
+        }
+
+    def add_layout_label(
+        self,
+        layout_name,
+        text,
+        x=10,
+        y=10,
+        width=100,
+        height=20,
+        font_size=12,
+        color="#000000",
+        **kwargs,
+    ):
+        """Add a text label to a print layout. Supports [% expression %] in text."""
+        from qgis.core import QgsLayoutItemLabel
+
+        layout = self._get_layout(layout_name)
+        label = QgsLayoutItemLabel(layout)
+        label.setText(text)
+        label.setFontColor(QColor(color))
+        font = label.font()
+        font.setPointSize(int(font_size))
+        label.setFont(font)
+        layout.addLayoutItem(label)
+        label.attemptMove(QgsLayoutPoint(x, y))
+        label.attemptResize(QgsLayoutSize(width, height))
+        return {"ok": True, "uuid": label.uuid()}
+
+    def add_layout_legend(
+        self,
+        layout_name,
+        map_item_id=None,
+        x=10,
+        y=10,
+        width=80,
+        height=100,
+        title="Legend",
+        **kwargs,
+    ):
+        """Add a legend to a print layout, linked to a map item."""
+        from qgis.core import QgsLayoutItemLegend
+
+        layout = self._get_layout(layout_name)
+        legend = QgsLayoutItemLegend(layout)
+        legend.setTitle(title)
+        map_item = self._find_layout_map(layout, map_item_id)
+        if map_item:
+            legend.setLinkedMap(map_item)
+        layout.addLayoutItem(legend)
+        legend.attemptMove(QgsLayoutPoint(x, y))
+        legend.attemptResize(QgsLayoutSize(width, height))
+        return {"ok": True, "uuid": legend.uuid()}
+
+    def add_layout_scalebar(
+        self,
+        layout_name,
+        map_item_id=None,
+        x=10,
+        y=180,
+        width=80,
+        height=20,
+        style="Single Box",
+        **kwargs,
+    ):
+        """Add a scale bar to a print layout, linked to a map item."""
+        from qgis.core import QgsLayoutItemScaleBar
+
+        layout = self._get_layout(layout_name)
+        bar = QgsLayoutItemScaleBar(layout)
+        bar.setStyle(style)
+        map_item = self._find_layout_map(layout, map_item_id)
+        if map_item:
+            bar.setLinkedMap(map_item)
+        bar.applyDefaultSize()
+        layout.addLayoutItem(bar)
+        bar.attemptMove(QgsLayoutPoint(x, y))
+        return {"ok": True, "uuid": bar.uuid()}
+
+    def add_layout_picture(
+        self, layout_name, path, x=10, y=10, width=30, height=30, **kwargs
+    ):
+        """Add a picture/SVG (logo, north arrow) to a print layout."""
+        from qgis.core import QgsLayoutItemPicture
+
+        layout = self._get_layout(layout_name)
+        pic = QgsLayoutItemPicture(layout)
+        pic.setPicturePath(path)
+        layout.addLayoutItem(pic)
+        pic.attemptMove(QgsLayoutPoint(x, y))
+        pic.attemptResize(QgsLayoutSize(width, height))
+        return {"ok": True, "uuid": pic.uuid()}
+
+    def add_layout_table(
+        self,
+        layout_name,
+        layer_id,
+        x=10,
+        y=10,
+        width=180,
+        height=80,
+        max_rows=20,
+        **kwargs,
+    ):
+        """Add an attribute table for a vector layer to a print layout."""
+        from qgis.core import QgsLayoutFrame, QgsLayoutItemAttributeTable
+
+        layer = self._get_vector_layer(layer_id)
+        layout = self._get_layout(layout_name)
+        table = QgsLayoutItemAttributeTable.create(layout)
+        table.setVectorLayer(layer)
+        table.setMaximumNumberOfFeatures(int(max_rows))
+        layout.addMultiFrame(table)
+        frame = QgsLayoutFrame(layout, table)
+        frame.attemptMove(QgsLayoutPoint(x, y))
+        frame.attemptResize(QgsLayoutSize(width, height))
+        table.addFrame(frame)
+        return {"ok": True, "uuid": frame.uuid()}
+
+    def configure_atlas(
+        self,
+        layout_name,
+        coverage_layer,
+        enabled=True,
+        page_name_expression=None,
+        filter_expression=None,
+        sort_expression=None,
+        **kwargs,
+    ):
+        """Configure the atlas of a print layout (coverage layer, filter, sort)."""
+        layer = self._get_vector_layer(coverage_layer)
+        layout = self._get_layout(layout_name)
+        atlas = layout.atlas()
+        atlas.setEnabled(bool(enabled))
+        atlas.setCoverageLayer(layer)
+        if page_name_expression:
+            atlas.setPageNameExpression(page_name_expression)
+        if filter_expression:
+            atlas.setFilterFeatures(True)
+            atlas.setFilterExpression(filter_expression)
+        if sort_expression:
+            atlas.setSortFeatures(True)
+            atlas.setSortExpression(sort_expression)
+        atlas.updateFeatures()
+        return {
+            "ok": True,
+            "coverage_layer": layer.name(),
+            "enabled": bool(enabled),
+            "count": atlas.count(),
+        }
+
+    def export_atlas(self, layout_name, output_path, format="pdf", dpi=300, **kwargs):
+        """Export an atlas: single multi-page PDF, or one image file per feature."""
+        import os
+
+        layout = self._get_layout(layout_name)
+        atlas = layout.atlas()
+        if not atlas.enabled():
+            raise Exception("Atlas not enabled; call configure_atlas first")
+        atlas.updateFeatures()
+        fmt = format.lower()
+        if fmt == "pdf":
+            settings = QgsLayoutExporter.PdfExportSettings()
+            settings.dpi = dpi
+            result, error = QgsLayoutExporter.exportToPdf(atlas, output_path, settings)
+        elif fmt in ("png", "jpg", "jpeg", "tif", "tiff"):
+            os.makedirs(output_path, exist_ok=True)
+            settings = QgsLayoutExporter.ImageExportSettings()
+            settings.dpi = dpi
+            base = os.path.join(output_path, layout_name)
+            result, error = QgsLayoutExporter.exportToImage(atlas, base, fmt, settings)
+        else:
+            raise Exception(f"Unsupported atlas format: {format}")
+        if result != LAYOUT_SUCCESS:
+            raise Exception(f"Atlas export failed: {error}")
+        return {"ok": True, "output": output_path, "count": atlas.count()}
+
+    def remove_layout(self, layout_name, **kwargs):
+        """Remove a print layout from the project."""
+        manager = QgsProject.instance().layoutManager()
+        layout = manager.layoutByName(layout_name)
+        if not layout:
+            raise Exception(f"Layout not found: {layout_name}")
+        manager.removeLayout(layout)
+        return {"ok": True, "removed": layout_name}
+
+    # ------------------------------------------------------------------
+    # Query, expression & layer management (extended)
+    # ------------------------------------------------------------------
+
+    def execute_sql(
+        self,
+        query,
+        layers=None,
+        as_layer=False,
+        layer_name="sql_result",
+        geometry_field=None,
+        uid_field=None,
+        **kwargs,
+    ):
+        """Run SQL across loaded layers via a virtual layer. Reference layers by name."""
+        from qgis.core import QgsVirtualLayerDefinition
+
+        project = QgsProject.instance()
+        definition = QgsVirtualLayerDefinition()
+        src_ids = layers or list(project.mapLayers().keys())
+        for lid in src_ids:
+            lyr = project.mapLayer(lid)
+            if lyr is None:
+                raise Exception(f"Layer not found: {lid}")
+            definition.addSource(lyr.name(), lid)
+        definition.setQuery(query)
+        if geometry_field:
+            definition.setGeometryField(geometry_field)
+        else:
+            definition.setGeometryWkbType(QgsWkbTypes.NoGeometry)
+        if uid_field:
+            definition.setUid(uid_field)
+        vlayer = QgsVectorLayer(definition.toString(), layer_name, "virtual")
+        if not vlayer.isValid():
+            raise Exception(f"Invalid SQL/virtual layer for query: {query}")
+        if as_layer:
+            project.addMapLayer(vlayer)
+            return {
+                "output_layer_id": vlayer.id(),
+                "name": vlayer.name(),
+                "feature_count": vlayer.featureCount(),
+            }
+        fields = [f.name() for f in vlayer.fields()]
+        rows = []
+        for i, feat in enumerate(vlayer.getFeatures()):
+            if i >= 1000:
+                break
+            rows.append({fn: feat[fn] for fn in fields})
+        return {"fields": fields, "rows": rows, "count": len(rows)}
+
+    def evaluate_expression(self, expression, layer_id=None, **kwargs):
+        """Evaluate a standalone QGIS expression to a scalar value."""
+        exp = QgsExpression(expression)
+        context = QgsExpressionContext()
+        context.appendScope(QgsExpressionContextUtils.globalScope())
+        context.appendScope(
+            QgsExpressionContextUtils.projectScope(QgsProject.instance())
+        )
+        if layer_id:
+            layer = self._get_vector_layer(layer_id)
+            context.appendScope(QgsExpressionContextUtils.layerScope(layer))
+        value = exp.evaluate(context)
+        if exp.hasParserError():
+            raise Exception(f"Parser error: {exp.parserErrorString()}")
+        if exp.hasEvalError():
+            raise Exception(f"Eval error: {exp.evalErrorString()}")
+        return {"expression": expression, "result": value}
+
+    def identify_features(
+        self, point, tolerance=0.0, layer_ids=None, limit=10, **kwargs
+    ):
+        """Identify features at a point [x, y] (project CRS) across layers."""
+        project = QgsProject.instance()
+        x, y = float(point[0]), float(point[1])
+        pt_geom = QgsGeometry.fromPointXY(QgsPointXY(x, y))
+        if layer_ids:
+            targets = [project.mapLayer(lid) for lid in layer_ids]
+        else:
+            targets = [
+                n.layer() for n in project.layerTreeRoot().findLayers() if n.isVisible()
+            ]
+        prefilter = QgsRectangle(
+            x - tolerance, y - tolerance, x + tolerance, y + tolerance
+        )
+        results = []
+        for layer in targets:
+            if layer is None or layer.type() != LAYER_VECTOR:
+                continue
+            req = QgsFeatureRequest().setFilterRect(prefilter)
+            feats = []
+            for feat in layer.getFeatures(req):
+                geom = feat.geometry()
+                if geom.isEmpty():
+                    continue
+                if tolerance > 0:
+                    if geom.distance(pt_geom) > tolerance:
+                        continue
+                elif not geom.intersects(pt_geom):
+                    continue
+                attrs = {f.name(): feat[f.name()] for f in layer.fields()}
+                attrs["_fid"] = feat.id()
+                feats.append(attrs)
+                if len(feats) >= limit:
+                    break
+            if feats:
+                results.append(
+                    {
+                        "layer_id": layer.id(),
+                        "name": layer.name(),
+                        "features": feats,
+                        "count": len(feats),
+                    }
+                )
+        return {"point": [x, y], "results": results}
+
+    def duplicate_layer(self, layer_id, new_name=None, **kwargs):
+        """Duplicate a layer (with its style) under a new name."""
+        project = QgsProject.instance()
+        if layer_id not in project.mapLayers():
+            raise Exception(f"Layer not found: {layer_id}")
+        layer = project.mapLayer(layer_id)
+        clone = layer.clone()
+        clone.setName(new_name or f"{layer.name()} copy")
+        project.addMapLayer(clone)
+        return {"ok": True, "output_layer_id": clone.id(), "name": clone.name()}
+
+    def set_layer_order(self, layer_ids, **kwargs):
+        """Set explicit layer draw order in the tree (top to bottom)."""
+        project = QgsProject.instance()
+        root = project.layerTreeRoot()
+        layers = []
+        for lid in layer_ids:
+            lyr = project.mapLayer(lid)
+            if lyr is None:
+                raise Exception(f"Layer not found: {lid}")
+            layers.append(lyr)
+        root.setHasCustomLayerOrder(True)
+        root.setCustomLayerOrder(layers)
+        return {"ok": True, "order": layer_ids}
 
     # ------------------------------------------------------------------
     # Processing framework (extended)

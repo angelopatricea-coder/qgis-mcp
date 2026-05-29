@@ -57,7 +57,7 @@ uv run --no-sync pytest tests/ -v
 | `QGIS_MCP_LOG_LEVEL` | `INFO` | File log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `QGIS_MCP_TOOL_MODE` | `granular` | Tool registration mode: `granular` (51 tools) or `compound` (~19 grouped tools) |
 
-## MCP Tools (88 total)
+## MCP Tools (102 total)
 
 | Tool | Title | Annotations | Description |
 |---|---|---|---|
@@ -124,6 +124,20 @@ uv run --no-sync pytest tests/ -v
 | `field_calculator` | Field Calculator | — | Add+populate field from QGIS expression, in-place |
 | `get_unique_values` | Get Unique Values | readOnly | Distinct values of a field (limit, -1 for all) |
 | `spatial_join` | Spatial Join | — | Join attributes by location (native:joinattributesbylocation), memory or file out (60s) |
+| `get_layout_info` | Get Layout Info | readOnly | List items in a print layout (type, id, uuid, position, size) |
+| `add_layout_label` | Add Layout Label | — | Add a text label (supports `[% expr %]`) to a layout |
+| `add_layout_legend` | Add Layout Legend | — | Add a legend linked to a map item |
+| `add_layout_scalebar` | Add Layout Scale Bar | — | Add a scale bar linked to a map item |
+| `add_layout_picture` | Add Layout Picture | — | Add a picture/SVG (logo, north arrow) to a layout |
+| `add_layout_table` | Add Layout Table | — | Add an attribute table for a vector layer to a layout |
+| `configure_atlas` | Configure Atlas | — | Configure a layout atlas (coverage layer, page name/filter/sort) |
+| `export_atlas` | Export Atlas | idempotent | Export atlas: single multi-page PDF, or one image per feature (60s) |
+| `remove_layout` | Remove Layout | destructive | Remove a print layout (elicitation) |
+| `execute_sql` | Execute SQL | — | SQL across loaded layers via virtual layer; rows inline or as a new layer (60s) |
+| `evaluate_expression` | Evaluate Expression | readOnly | Evaluate a standalone QGIS expression to a scalar (aggregate, @vars) |
+| `identify_features` | Identify Features | readOnly | Features at a point [x,y] across layers (map-click analogue) |
+| `duplicate_layer` | Duplicate Layer | — | Duplicate a layer (with style) under a new name |
+| `set_layer_order` | Set Layer Order | idempotent | Set explicit layer draw order (top to bottom) |
 
 > Note: the "Phase 5/6/7" tools (active layer, canvas scale, labeling, layer CRS, bookmarks, map themes, project CRS, web layers, table joins, field add/delete/rename, QML styles, layout create/add-map, and the processing/analysis tools above) extend the original 52. Some are not yet listed individually in this table — see `execute_command` handlers in `qgis_mcp_plugin/plugin.py` for the authoritative set.
 

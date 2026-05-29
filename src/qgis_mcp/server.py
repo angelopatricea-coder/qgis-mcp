@@ -1698,6 +1698,317 @@ async def add_layout_map(
     )
 
 
+@mcp.tool(
+    title="Get Layout Info",
+    annotations=ToolAnnotations(readOnlyHint=True),
+    description="List items in a print layout (type, id, uuid, position, size) and page count.",
+    structured_output=True,
+)
+async def get_layout_info(ctx: Context, layout_name: str) -> dict[str, Any]:
+    return await _send("get_layout_info", {"layout_name": layout_name})
+
+
+@mcp.tool(
+    title="Add Layout Label",
+    description="Add a text label to a print layout (mm). text may contain [% expression %] "
+    "for dynamic content. color is hex (e.g. '#000000').",
+)
+async def add_layout_label(
+    ctx: Context,
+    layout_name: str,
+    text: str,
+    x: float = 10,
+    y: float = 10,
+    width: float = 100,
+    height: float = 20,
+    font_size: int = 12,
+    color: str = "#000000",
+) -> dict:
+    return await _send(
+        "add_layout_label",
+        {
+            "layout_name": layout_name,
+            "text": text,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "font_size": font_size,
+            "color": color,
+        },
+    )
+
+
+@mcp.tool(
+    title="Add Layout Legend",
+    description="Add a legend to a print layout, linked to a map item (defaults to the first "
+    "map item). Position/size in mm.",
+)
+async def add_layout_legend(
+    ctx: Context,
+    layout_name: str,
+    map_item_id: str | None = None,
+    x: float = 10,
+    y: float = 10,
+    width: float = 80,
+    height: float = 100,
+    title: str = "Legend",
+) -> dict:
+    return await _send(
+        "add_layout_legend",
+        {
+            "layout_name": layout_name,
+            "map_item_id": map_item_id,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "title": title,
+        },
+    )
+
+
+@mcp.tool(
+    title="Add Layout Scale Bar",
+    description="Add a scale bar to a print layout, linked to a map item. style e.g. "
+    "'Single Box', 'Double Box', 'Line Ticks Up', 'Numeric'.",
+)
+async def add_layout_scalebar(
+    ctx: Context,
+    layout_name: str,
+    map_item_id: str | None = None,
+    x: float = 10,
+    y: float = 180,
+    width: float = 80,
+    height: float = 20,
+    style: str = "Single Box",
+) -> dict:
+    return await _send(
+        "add_layout_scalebar",
+        {
+            "layout_name": layout_name,
+            "map_item_id": map_item_id,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "style": style,
+        },
+    )
+
+
+@mcp.tool(
+    title="Add Layout Picture",
+    description="Add a picture or SVG (logo, north arrow) to a print layout. path is an image "
+    "or SVG file path. Position/size in mm.",
+)
+async def add_layout_picture(
+    ctx: Context,
+    layout_name: str,
+    path: str,
+    x: float = 10,
+    y: float = 10,
+    width: float = 30,
+    height: float = 30,
+) -> dict:
+    return await _send(
+        "add_layout_picture",
+        {
+            "layout_name": layout_name,
+            "path": path,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+        },
+    )
+
+
+@mcp.tool(
+    title="Add Layout Table",
+    description="Add an attribute table for a vector layer to a print layout. "
+    "max_rows caps the number of features shown. Position/size in mm.",
+)
+async def add_layout_table(
+    ctx: Context,
+    layout_name: str,
+    layer_id: str,
+    x: float = 10,
+    y: float = 10,
+    width: float = 180,
+    height: float = 80,
+    max_rows: int = 20,
+) -> dict:
+    return await _send(
+        "add_layout_table",
+        {
+            "layout_name": layout_name,
+            "layer_id": layer_id,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "max_rows": max_rows,
+        },
+    )
+
+
+@mcp.tool(
+    title="Configure Atlas",
+    description="Configure a print layout's atlas: coverage_layer (vector layer id) drives one "
+    "page per feature. Optional page_name_expression, filter_expression, sort_expression.",
+)
+async def configure_atlas(
+    ctx: Context,
+    layout_name: str,
+    coverage_layer: str,
+    enabled: bool = True,
+    page_name_expression: str | None = None,
+    filter_expression: str | None = None,
+    sort_expression: str | None = None,
+) -> dict:
+    return await _send(
+        "configure_atlas",
+        {
+            "layout_name": layout_name,
+            "coverage_layer": coverage_layer,
+            "enabled": enabled,
+            "page_name_expression": page_name_expression,
+            "filter_expression": filter_expression,
+            "sort_expression": sort_expression,
+        },
+    )
+
+
+@mcp.tool(
+    title="Export Atlas",
+    annotations=ToolAnnotations(idempotentHint=True),
+    description="Export a configured atlas. format 'pdf' writes a single multi-page file at "
+    "output_path; image formats ('png','jpg','tif') write one file per feature into the "
+    "output_path directory. Call configure_atlas first.",
+)
+async def export_atlas(
+    ctx: Context,
+    layout_name: str,
+    output_path: str,
+    format: str = "pdf",
+    dpi: int = 300,
+) -> dict:
+    await ctx.info(f"Exporting atlas '{layout_name}' as {format} to {output_path}")
+    return await _send(
+        "export_atlas",
+        {
+            "layout_name": layout_name,
+            "output_path": output_path,
+            "format": format,
+            "dpi": dpi,
+        },
+        timeout=TIMEOUT_LONG,
+    )
+
+
+@mcp.tool(
+    title="Remove Layout",
+    annotations=ToolAnnotations(destructiveHint=True),
+    description="Remove a print layout from the project.",
+)
+async def remove_layout(ctx: Context, layout_name: str) -> dict:
+    if not await _confirm_destructive(ctx, f"Remove layout '{layout_name}'?"):
+        return {"ok": False, "message": "Cancelled by user"}
+    return await _send("remove_layout", {"layout_name": layout_name})
+
+
+@mcp.tool(
+    title="Execute SQL",
+    description="SQL across loaded layers via a virtual layer; reference layers by name in "
+    "FROM/JOIN. as_layer=True registers the result as a new layer (set geometry_field for "
+    "spatial output); else returns rows inline (max 1000). layers limits sources by layer id.",
+)
+async def execute_sql(
+    ctx: Context,
+    query: str,
+    layers: list[str] | None = None,
+    as_layer: bool = False,
+    layer_name: str = "sql_result",
+    geometry_field: str | None = None,
+    uid_field: str | None = None,
+) -> dict:
+    return await _send(
+        "execute_sql",
+        {
+            "query": query,
+            "layers": layers,
+            "as_layer": as_layer,
+            "layer_name": layer_name,
+            "geometry_field": geometry_field,
+            "uid_field": uid_field,
+        },
+        timeout=TIMEOUT_LONG,
+    )
+
+
+@mcp.tool(
+    title="Evaluate Expression",
+    annotations=ToolAnnotations(readOnlyHint=True),
+    description="Evaluate a standalone QGIS expression to a scalar value (e.g. "
+    "aggregate('layer','sum','field'), @project_var, now()). Optional layer_id adds layer "
+    "scope. Distinct from validate_expression (validate only) and field_calculator (per-feature).",
+)
+async def evaluate_expression(
+    ctx: Context, expression: str, layer_id: str | None = None
+) -> dict:
+    return await _send(
+        "evaluate_expression", {"expression": expression, "layer_id": layer_id}
+    )
+
+
+@mcp.tool(
+    title="Identify Features",
+    annotations=ToolAnnotations(readOnlyHint=True),
+    description="Identify features at a point [x, y] in project CRS across layers (map-click "
+    "analogue). tolerance (map units) expands the search; 0 = exact hit. layer_ids limits the "
+    "search (default: visible vector layers). limit caps features per layer.",
+)
+async def identify_features(
+    ctx: Context,
+    point: list[float],
+    tolerance: float = 0.0,
+    layer_ids: list[str] | None = None,
+    limit: int = 10,
+) -> dict:
+    return await _send(
+        "identify_features",
+        {
+            "point": point,
+            "tolerance": tolerance,
+            "layer_ids": layer_ids,
+            "limit": limit,
+        },
+    )
+
+
+@mcp.tool(
+    title="Duplicate Layer",
+    description="Duplicate a layer (including its style) under a new name.",
+)
+async def duplicate_layer(
+    ctx: Context, layer_id: str, new_name: str | None = None
+) -> dict:
+    return await _send(
+        "duplicate_layer", {"layer_id": layer_id, "new_name": new_name}
+    )
+
+
+@mcp.tool(
+    title="Set Layer Order",
+    annotations=ToolAnnotations(idempotentHint=True),
+    description="Set the explicit layer draw order in the tree. layer_ids is the ordered list "
+    "of layer ids from top (drawn last) to bottom.",
+)
+async def set_layer_order(ctx: Context, layer_ids: list[str]) -> dict:
+    return await _send("set_layer_order", {"layer_ids": layer_ids})
+
+
 # ---------------------------------------------------------------------------
 # Compound tool mode (opt-in via QGIS_MCP_TOOL_MODE=compound)
 # ---------------------------------------------------------------------------
@@ -1840,14 +2151,17 @@ QGIS MCP connects QGIS Desktop to LLMs via the Model Context Protocol.
 - **Rendering**: render_map (re-render to image), get_canvas_screenshot (fast grab)
 - **Code**: execute_code (arbitrary PyQGIS)
 - **Batch**: batch_commands (multiple commands in one round-trip)
-- **Layouts**: list_layouts, export_layout, create_layout, add_layout_map
+- **Layouts**: list_layouts, export_layout, create_layout, add_layout_map, add_layout_label, add_layout_legend, add_layout_scalebar, add_layout_picture, add_layout_table, get_layout_info, remove_layout
+- **Atlas**: configure_atlas (coverage layer), export_atlas (one page per feature)
+- **Query**: execute_sql (SQL across layers via virtual layer), evaluate_expression (scalar/aggregate), identify_features (features at a point)
+- **Layer mgmt**: duplicate_layer, set_layer_order
 - **Logging**: get_message_log
 - **Plugins**: list_plugins, get_plugin_info, reload_plugin
 - **Layer Tree**: get_layer_tree, create_layer_group, move_layer_to_group
 - **Properties**: set_layer_property, get_layer_extent
 - **CRS**: get_layer_crs, set_layer_crs, transform_coordinates
 - **Variables**: get_project_variables, set_project_variable
-- **Expression**: validate_expression
+- **Expression**: validate_expression, evaluate_expression
 - **Settings**: get_setting, set_setting
 - **Bookmarks**: get_bookmarks, add_bookmark, remove_bookmark
 - **Map Themes**: get_map_themes, add_map_theme, remove_map_theme, apply_map_theme
