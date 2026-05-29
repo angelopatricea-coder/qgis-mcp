@@ -3660,11 +3660,17 @@ class QgisMCPPlugin:
         self.tool_button.setToolButtonStyle(TOOLBUTTON_ICON_ONLY)
         self._toolbar_action = toolbar.addWidget(self.tool_button)
 
-        self.help_action = QAction("MCP Setup & Configurator", self.iface.mainWindow())
+        self.help_action = QAction(self._logo_icon(), "MCP Setup Configurator", self.iface.mainWindow())
         self.help_action.triggered.connect(self._show_help)
 
         self.iface.addPluginToMenu("QGIS MCP", self.action)
         self.iface.addPluginToMenu("QGIS MCP", self.help_action)
+
+        # Set the icon on the "QGIS MCP" submenu itself (top-level entry)
+        for sub in self.iface.pluginMenu().actions():
+            if sub.text() == "QGIS MCP" and sub.menu():
+                sub.setIcon(self._logo_icon())
+                break
 
         # Restore saved port
         saved_port = settings.value(f"{self.SETTINGS_PREFIX}/port", _DEFAULT_PORT, type=int)
