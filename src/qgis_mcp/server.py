@@ -515,10 +515,10 @@ async def zoom_to_layer(ctx: Context, layer_id: str) -> dict:
 @mcp.tool(
     title="Get Layer Features",
     annotations=ToolAnnotations(readOnlyHint=True),
-    description="Retrieve features from a vector layer. Features are flat dicts with _fid and attributes "
-    "at top level. Supports expression filtering (QGIS expressions like "
-    '"name = \'Berlin\'" or "population > 1000000"), limit (max 50, default 10), offset for paging, '
-    "and optional geometry inclusion (in _geometry key).",
+    description="Get features from a vector layer. Flat dicts: _fid + attributes at top level. "
+    "expression filter (QGIS, e.g. "
+    '"name = \'Berlin\'", "population > 1000000"), limit (max 50, default 10), offset for paging, '
+    "optional geometry in _geometry key.",
     structured_output=True,
 )
 async def get_layer_features(
@@ -653,10 +653,10 @@ async def clear_selection(ctx: Context, layer_id: str) -> dict:
 
 @mcp.tool(
     title="Set Layer Style",
-    description="Set layer symbology. style_type: 'single' (one symbol), 'categorized' (unique values), "
-    "or 'graduated' (numeric ranges). field is required for categorized/graduated. "
-    "color_ramp: name from QGIS style (e.g. 'Spectral', 'Viridis', 'Blues'). "
-    "classes: number of classes for graduated (default 5).",
+    description="Set symbology. style_type: 'single' (one symbol), 'categorized' (unique values), "
+    "'graduated' (numeric ranges). field required for categorized/graduated. "
+    "color_ramp: QGIS ramp name (e.g. 'Spectral', 'Viridis', 'Blues'). "
+    "classes: graduated class count (default 5).",
 )
 async def set_layer_style(
     ctx: Context,
@@ -787,31 +787,26 @@ async def get_algorithm_help(ctx: Context, algorithm_id: str) -> dict[str, Any]:
 @mcp.tool(
     title="Create Processing Model",
     description=(
-        "Build a QGIS Processing Model (.model3 workflow) from a structured spec, save it into "
-        "the QGIS user models folder, and register it in the Processing Toolbox. "
-        "This is the only call needed: algorithm discovery and parameter validation happen "
-        "inside the plugin against the live QGIS Processing registry — DO NOT call "
-        "list_processing_algorithms or get_algorithm_help first. Pass a keyword like 'buffer' "
-        "or 'centroids' (or a full id like 'native:buffer') and the handler resolves it; on an "
-        "ambiguous hint it returns the candidate list so you can refine and retry. Unknown "
-        "parameter or output names are reported with the valid set for the algorithm.\n\n"
-        "Spec shape:\n"
-        "  inputs: [{name, type, description?, default?, optional?, parent_layer? (for 'field'/'distance'), "
-        "options? (for 'enum')}]. Types: vector, feature_source, raster, field, number, integer, distance, "
-        "string, boolean, extent, crs, point, file, folder, enum, multiple_layers.\n"
-        "  steps: [{id, algorithm, description?, parameters: {ALG_PARAM: value, ...}}]. "
-        "'algorithm' may be a fuzzy keyword or a full id. Step parameter values use:\n"
-        "    '@input_name'      – the value of a model input\n"
-        "    '$step_id.OUTPUT'  – an output of an earlier step\n"
-        "    '=expression'      – a QGIS expression evaluated at run time\n"
-        "    anything else      – a static literal (number, bool, string, list, ...)\n"
-        "  outputs: [{name, from_step, from_output, description?}] – final outputs the model exposes. "
-        "If omitted, the OUTPUT of the last step is exposed automatically as 'Result'.\n\n"
-        "The model is always saved into the QGIS user profile's Processing models folder. If "
-        "'<name>.model3' already exists, a unique suffix is appended ('<name>_2.model3', "
-        "'<name>_3.model3', ...). The actual filename used is returned as 'name' alongside the "
-        "originally requested name as 'requested_name'. The response also echoes 'resolved_steps' "
-        "so the caller can verify which algorithm each hint mapped to."
+        "Build QGIS Processing Model (.model3) from structured spec; save to user models folder, "
+        "register in Processing Toolbox. Only call needed: algorithm discovery + param validation "
+        "run in the plugin against the live registry, so do NOT call list_processing_algorithms "
+        "or get_algorithm_help first. Pass keyword ('buffer') or full id ('native:buffer'); "
+        "handler resolves it. Ambiguous hint returns candidate list to refine and retry. Bad "
+        "param/output names reported with the valid set.\n\n"
+        "Spec:\n"
+        "  inputs: [{name, type, description?, default?, optional?, parent_layer? (for field/distance), "
+        "options? (for enum)}]. Types: vector, feature_source, raster, field, number, integer, "
+        "distance, string, boolean, extent, crs, point, file, folder, enum, multiple_layers.\n"
+        "  steps: [{id, algorithm, description?, parameters: {ALG_PARAM: value}}]. algorithm = "
+        "keyword or full id. Param values:\n"
+        "    '@input_name'     = model input value\n"
+        "    '$step_id.OUTPUT' = earlier step output\n"
+        "    '=expression'     = QGIS expression at run time\n"
+        "    else              = static literal (number/bool/string/list)\n"
+        "  outputs: [{name, from_step, from_output, description?}] = exposed outputs; omit to "
+        "expose the last step OUTPUT as 'Result'.\n\n"
+        "Name collision appends a suffix (name_2.model3, ...). Response returns the actual "
+        "'name', the 'requested_name', and 'resolved_steps' (which algorithm each hint mapped to)."
     ),
     structured_output=True,
 )
@@ -916,10 +911,10 @@ async def raster_calculator(
 
 @mcp.tool(
     title="Zonal Statistics",
-    description="Compute per-polygon statistics from a raster (native:zonalstatisticsfb). "
-    "'stats' is a list of int codes: 0=count,1=sum,2=mean,3=median,4=stdev,5=min,6=max,"
-    "7=range,8=minority,9=majority,10=variety,11=variance (default [0,1,2]). New columns "
-    "are prefixed by 'prefix'. Omit output_path for an in-memory result layer.",
+    description="Per-polygon stats from a raster (native:zonalstatisticsfb). "
+    "stats int codes: 0=count 1=sum 2=mean 3=median 4=stdev 5=min 6=max "
+    "7=range 8=minority 9=majority 10=variety 11=variance (default [0,1,2]). New columns "
+    "prefixed by 'prefix'. No output_path = in-memory layer.",
 )
 async def zonal_statistics(
     ctx: Context,
@@ -967,10 +962,9 @@ async def sample_raster_values(
 @mcp.tool(
     title="Export Layer",
     annotations=ToolAnnotations(idempotentHint=True),
-    description="Export a vector or raster layer to disk; output format is inferred from the "
-    "output_path extension (.gpkg, .shp, .geojson, .tif, ...). Set target_crs (e.g. 'EPSG:4326') "
-    "to reproject on export. filter_expression (vector only) exports a subset matching a QGIS "
-    "expression.",
+    description="Export vector/raster to disk; format from output_path extension "
+    "(.gpkg, .shp, .geojson, .tif, ...). target_crs (e.g. 'EPSG:4326') reprojects on export. "
+    "filter_expression (vector only) exports a subset matching a QGIS expression.",
 )
 async def export_layer(
     ctx: Context,
@@ -997,9 +991,9 @@ async def export_layer(
 
 @mcp.tool(
     title="Field Calculator",
-    description="Add (if missing) and populate a field from a QGIS expression, evaluated per "
-    "feature, in-place. field_type: string|int|double|bool|date|datetime (default double). "
-    "Example: expression='$area', field_name='area_m2'. Returns count of updated features.",
+    description="Add (if missing) + populate a field from a QGIS expression, per feature, in-place. "
+    "field_type: string|int|double|bool|date|datetime (default double). "
+    "Example: expression='$area', field_name='area_m2'. Returns updated feature count.",
 )
 async def field_calculator(
     ctx: Context,
@@ -1040,10 +1034,10 @@ async def get_unique_values(
 @mcp.tool(
     title="Spatial Join",
     description="Join attributes by location (native:joinattributesbylocation). "
-    "predicates: list of int (0=intersects,1=contains,2=equals,3=touches,4=overlaps,"
-    "5=within,6=crosses; default [0]). method: 0=one-to-many, 1=first match (default), "
-    "2=largest overlap. join_fields limits which join columns are copied (default all). "
-    "Omit output_path for an in-memory result layer.",
+    "predicates int list: 0=intersects 1=contains 2=equals 3=touches 4=overlaps "
+    "5=within 6=crosses (default [0]). method: 0=one-to-many 1=first match (default) "
+    "2=largest overlap. join_fields = copied columns (default all). "
+    "No output_path = in-memory layer.",
 )
 async def spatial_join(
     ctx: Context,
@@ -1557,9 +1551,9 @@ async def set_setting(ctx: Context, key: str, value: str) -> dict:
 @mcp.tool(
     title="Transform Coordinates",
     annotations=ToolAnnotations(readOnlyHint=True),
-    description="Transform coordinates between CRS. Accepts a single point {x, y}, "
-    "a list of points [{x, y}, ...], or a bbox {xmin, ymin, xmax, ymax}. "
-    "Returns transformed coordinates in the same format.",
+    description="Transform coordinates between CRS. Accepts a point {x, y}, "
+    "a point list [{x, y}, ...], or a bbox {xmin, ymin, xmax, ymax}. "
+    "Returns the same format.",
     structured_output=True,
 )
 async def transform_coordinates(
@@ -2021,6 +2015,35 @@ if _tool_mode == "compound":
     mcp._tool_manager._tools.clear()
     register_compound_tools(mcp, _send, _confirm_destructive)
     logger.info(f"Compound tool mode: {len(mcp._tool_manager._tools)} tools registered")
+
+
+def _strip_schema_titles() -> None:
+    """Drop redundant auto-generated 'title' keys from tool input schemas.
+
+    Pydantic adds a display 'title' to the schema and every property (e.g. the
+    param ``layer_id`` gets ``"title": "Layer Id"``) that just restates the name.
+    It is sent to the client on every turn but carries no information, so removing
+    it trims ~2k tokens off the granular tool schema with no behavior change.
+    """
+
+    def clean(node: object) -> None:
+        if isinstance(node, dict):
+            node.pop("title", None)
+            for key in ("properties", "$defs", "definitions"):
+                for sub in node.get(key, {}).values():
+                    clean(sub)
+            for key in ("items", "additionalProperties"):
+                if isinstance(node.get(key), dict):
+                    clean(node[key])
+            for key in ("anyOf", "allOf", "oneOf"):
+                for sub in node.get(key, []):
+                    clean(sub)
+
+    for tool in mcp._tool_manager._tools.values():
+        clean(tool.parameters)
+
+
+_strip_schema_titles()
 
 
 # ===========================================================================
