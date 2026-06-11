@@ -80,11 +80,12 @@ from qgis.PyQt.QtCore import (
     QPointF,
     QProcess,
     QSize,
+    Qt,
     QTimer,
     QUrl,
     QVariant,
 )
-from qgis.PyQt.QtGui import QColor, QDesktopServices, QIcon
+from qgis.PyQt.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPen
 from qgis.PyQt.QtWidgets import (
     QAction,
     QCheckBox,
@@ -149,16 +150,23 @@ class QgisMCPServer(QObject):
     LOG_TAG: ClassVar[str] = "MCP"
     MAX_CLIENTS: ClassVar[int] = 10
 
-    def __init__(self, host=_DEFAULT_HOST, port=_DEFAULT_PORT, iface=None):
+    def __init__(self, host=_DEFAULT_HOST, port=_DEFAULT_PORT, iface=None, on_clients_changed=None):
         super().__init__()
         self.host = host
         self.port = port
         self.iface = iface
+        self.on_clients_changed = on_clients_changed
         self.running = False
         self.socket = None
         self.clients: dict[socket.socket, bytes] = {}
         self.timer = None
         self._message_log = deque(maxlen=1000)
+
+    def _notify_clients_changed(self):
+        """Report the active client count to the UI (badge on the toolbar icon)."""
+        if self.on_clients_changed:
+            with contextlib.suppress(Exception):
+                self.on_clients_changed(len(self.clients))
 
     def start(self):
         """Start the server"""
@@ -212,6 +220,7 @@ class QgisMCPServer(QObject):
             with contextlib.suppress(Exception):
                 client_sock.close()
         self.clients.clear()
+        self._notify_clients_changed()
 
         self.socket = None
         QgsMessageLog.logMessage("QGIS MCP server stopped", self.LOG_TAG, MSG_INFO)
@@ -222,6 +231,7 @@ class QgisMCPServer(QObject):
             client_sock.close()
         self.clients.pop(client_sock, None)
         QgsMessageLog.logMessage(f"{message} ({len(self.clients)} active)", self.LOG_TAG, level)
+        self._notify_clients_changed()
 
     def _send_response(self, client_sock, response):
         """Send a length-prefixed JSON response to a client."""
@@ -247,6 +257,7 @@ class QgisMCPServer(QObject):
                             self.LOG_TAG,
                             MSG_INFO,
                         )
+                        self._notify_clients_changed()
                     except BlockingIOError:
                         break
                     except Exception as e:
@@ -3159,23 +3170,23 @@ def _qgis_entry_command_args(entry):
     return cmd, entry.get("args", [])
 
 
-def _qgis_entry_is_stale(entry):
-    """True when a remote uvx 'qgis' entry lacks --refresh-package (won't auto-update)."""
+def _qgis_entry_has_refresh(entry):
+    """True when a remote uvx 'qgis' entry has --refresh-package (fails offline)."""
     command, args = _qgis_entry_command_args(entry)
     if command != "uvx" or "qgis-mcp-server" not in args:
         return False  # local mode / unknown — leave alone
-    return "--refresh-package" not in args
+    return "--refresh-package" in args
 
 
-def _add_refresh_to_entry(entry):
-    """Insert '--refresh-package qgis-mcp' before '--from' in a uvx 'qgis' entry."""
+def _remove_refresh_from_entry(entry):
+    """Remove '--refresh-package qgis-mcp' from a uvx 'qgis' entry."""
     cmd = entry.get("command")
     args = cmd.get("args", []) if isinstance(cmd, dict) else entry.get("args", [])
     try:
-        idx = args.index("--from")
+        idx = args.index("--refresh-package")
+        del args[idx : idx + 2]
     except ValueError:
-        idx = 0
-    args[idx:idx] = ["--refresh-package", "qgis-mcp"]
+        pass
     if isinstance(cmd, dict):
         cmd["args"] = args
     else:
@@ -3230,9 +3241,10 @@ class MCPConfiguratorDialog(QDialog):
         self.refresh_check.setToolTip(
             "Add --refresh-package qgis-mcp so uvx re-pulls the latest server from\n"
             "GitHub on every client launch (stays in sync with the plugin).\n"
-            "Uncheck to pin to the cached version (faster start, manual updates)."
+            "Warning: requires network at launch — the server fails to start offline.\n"
+            "Leave unchecked to use the cached version (works offline, manual updates)."
         )
-        self.refresh_check.setChecked(True)
+        self.refresh_check.setChecked(False)
         self.refresh_check.toggled.connect(self._on_client_changed)
         client_row.addWidget(self.refresh_check)
         client_row.addStretch()
@@ -3281,7 +3293,7 @@ class MCPConfiguratorDialog(QDialog):
         layout.addLayout(action_row)
 
         # ── Dev-only health checklist ─────────────────────────────────
-        self.checklist_group = QGroupBox("Development environment")
+        self.checklist_group = QGroupBox("Local install (git clone)")
         checklist_layout = QVBoxLayout()
         self.status_link = QLabel()
         self.status_uv = QLabel()
@@ -3335,13 +3347,19 @@ class MCPConfiguratorDialog(QDialog):
         plugin_src = self.repo_dir / "qgis_mcp_plugin"
 
         try:
-            if target.exists() or target.is_symlink():
-                if target.is_symlink() and target.resolve() == plugin_src.resolve():
+            if target.exists() or target.is_symlink() or os.path.islink(target):
+                if target.exists() and target.resolve() == plugin_src.resolve():
+                    # Already linked via symlink or Windows junction.
                     QgsMessageLog.logMessage("Plugin already correctly linked.", "MCP", MSG_INFO)
                     self.refresh_checklist()
                     return
-                if target.is_symlink() or target.is_file():
+                if target.is_symlink() or os.path.islink(target) or target.is_file():
                     target.unlink()
+                elif sys.platform == "win32":
+                    try:
+                        target.rmdir()  # removes a junction without touching the target
+                    except OSError:
+                        shutil.rmtree(target)
                 else:
                     shutil.rmtree(target)
 
@@ -3350,13 +3368,16 @@ class MCPConfiguratorDialog(QDialog):
                 try:
                     target.symlink_to(plugin_src, target_is_directory=True)
                 except OSError:
-                    QgsMessageLog.logMessage(
-                        "Symlink requires Developer Mode or admin on Windows. "
-                        "Run 'python install.py' from the repository root instead.",
-                        "MCP",
-                        MSG_WARNING,
-                    )
-                    return
+                    # Symlinks need Developer Mode/admin — fall back to a junction
+                    os.system(f'mklink /J "{target}" "{plugin_src}"')
+                    if not (target.exists() and target.resolve() == plugin_src.resolve()):
+                        QgsMessageLog.logMessage(
+                            "Failed to link plugin. Run 'python install.py' from "
+                            "the repository root instead.",
+                            "MCP",
+                            MSG_WARNING,
+                        )
+                        return
             else:
                 target.symlink_to(plugin_src)
             QgsMessageLog.logMessage(f"Linked plugin: {target} -> {plugin_src}", "MCP", MSG_INFO)
@@ -3370,7 +3391,9 @@ class MCPConfiguratorDialog(QDialog):
         if self._is_dev_install():
             plugins_dir = self._get_qgis_plugins_dir()
             target = plugins_dir / "qgis_mcp_plugin"
-            is_linked = target.is_symlink() and target.resolve() == (self.repo_dir / "qgis_mcp_plugin").resolve()
+            # resolve() follows symlinks AND Windows junctions (is_symlink() is
+            # False for junctions); a plain copy resolves to itself != repo.
+            is_linked = target.exists() and target.resolve() == (self.repo_dir / "qgis_mcp_plugin").resolve()
             self.status_link.setText(f"Plugin Link Status: {'✅ (linked)' if is_linked else '❌ (not linked)'}")
             self.status_link.setStyleSheet(f"color: {'green' if is_linked else 'red'};")
             self.relink_btn.setVisible(True)
@@ -3751,24 +3774,60 @@ class QgisMCPPlugin:
         icon_path = os.path.join(os.path.dirname(__file__), "icons", "icon_active.png")
         return QIcon(icon_path)
 
+    def _badge_icon(self, count):
+        """Green logo with a notification-style badge showing the client count."""
+        if count <= 0:
+            return self._green_logo_icon()
+        pixmap = self._green_logo_icon().pixmap(QSize(64, 64))
+        size = pixmap.width()
+        d = int(size * 0.45)  # badge diameter — large enough to survive toolbar downscale
+        x = 0
+        y = size - d  # bottom-left corner
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor("#D32F2F"))
+        pen = QPen(QColor("white"))  # white ring for contrast against the logo
+        pen.setWidth(max(2, size // 20))
+        painter.setPen(pen)
+        painter.drawEllipse(x + 1, y + 1, d - 2, d - 2)
+        painter.setPen(QColor("white"))
+        font = painter.font()
+        font.setPixelSize(int(d * 0.72))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(x, y, d, d, Qt.AlignCenter, str(min(count, 9)))
+        painter.end()
+        return QIcon(pixmap)
+
+    def _on_clients_changed(self, count):
+        """Update the toolbar icon badge when MCP clients connect/disconnect."""
+        if not (self.action and self.server):
+            return
+        port = self.server.port
+        self.action.setIcon(self._badge_icon(count))
+        plural = "client" if count == 1 else "clients"
+        self.action.setToolTip(
+            f"MCP server running on :{port} — {count} {plural} connected — click to stop"
+        )
+
     def _show_help(self):
         """Show the MCP Setup & Configurator dialog."""
         dlg = MCPConfiguratorDialog(self.iface, self.iface.mainWindow())
         dlg.exec()
 
     def _check_stale_mcp_configs(self):
-        """Offer (once) to add --refresh-package to existing no-refresh uvx configs.
+        """Offer (once) to remove --refresh-package from existing uvx configs.
 
-        Old users who configured before --refresh-package existed have a cached
-        uvx checkout that never auto-updates. Detect those entries and offer a
-        one-click rewrite so the server stays in sync with the plugin.
+        --refresh-package forces uvx to re-resolve the package from GitHub on
+        every launch, so the MCP server fails to start without network. Detect
+        those entries and offer a one-click rewrite to the cached version.
         """
         settings = QgsSettings()
-        if settings.value(f"{self.SETTINGS_PREFIX}/refresh_migration_prompted", False, type=bool):
+        if settings.value(f"{self.SETTINGS_PREFIX}/refresh_removal_prompted", False, type=bool):
             return
 
         repo_dir = Path(__file__).resolve().parent.parent
-        stale = []  # (client, path, key, data)
+        affected = []  # (client, path, key, data)
         for client, info in _client_config_registry(repo_dir).items():
             if info.get("print_only"):
                 continue
@@ -3781,26 +3840,26 @@ class QgisMCPPlugin:
             except (json.JSONDecodeError, OSError):
                 continue
             entry = data.get(info["key"], {}).get("qgis")
-            if _qgis_entry_is_stale(entry):
-                stale.append((client, path, info["key"], data))
+            if _qgis_entry_has_refresh(entry):
+                affected.append((client, path, info["key"], data))
 
-        if not stale:
+        if not affected:
             return  # nothing to migrate — stay silent
 
         # Prompt once, regardless of choice.
-        settings.setValue(f"{self.SETTINGS_PREFIX}/refresh_migration_prompted", True)
+        settings.setValue(f"{self.SETTINGS_PREFIX}/refresh_removal_prompted", True)
 
-        clients = ", ".join(sorted({c for c, *_ in stale}))
+        clients = ", ".join(sorted({c for c, *_ in affected}))
         box = QMessageBox(self.iface.mainWindow())
-        box.setWindowTitle("QGIS MCP — keep server up to date?")
+        box.setWindowTitle("QGIS MCP — fix offline startup?")
         box.setIcon(QMessageBox.Question)
         box.setText(
-            f"Your MCP config for {clients} pins a cached version of the server "
-            "that does not auto-update."
+            f"Your MCP config for {clients} uses '--refresh-package', which "
+            "makes the server fail to start without internet access."
         )
         box.setInformativeText(
-            "Add '--refresh-package qgis-mcp' so it re-pulls the latest from GitHub "
-            "on each launch (stays in sync with this plugin; ~1–3s slower start). "
+            "Remove '--refresh-package qgis-mcp' so the cached version is used "
+            "(works offline, faster start; update manually when needed). "
             "Restart your AI client afterwards to take effect."
         )
         update_btn = box.addButton("Update configs", QMessageBox.AcceptRole)
@@ -3811,8 +3870,8 @@ class QgisMCPPlugin:
             return
 
         updated = []
-        for client, path, key, data in stale:
-            _add_refresh_to_entry(data[key]["qgis"])
+        for client, path, key, data in affected:
+            _remove_refresh_from_entry(data[key]["qgis"])
             try:
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2)
@@ -3824,13 +3883,15 @@ class QgisMCPPlugin:
                 )
         if updated:
             QgsMessageLog.logMessage(
-                f"Added --refresh-package to configs: {', '.join(updated)}", "MCP", MSG_INFO
+                f"Removed --refresh-package from configs: {', '.join(updated)}", "MCP", MSG_INFO
             )
 
     def toggle_server(self, checked):
         if checked:
             port = self.port_spin.value()
-            self.server = QgisMCPServer(port=port, iface=self.iface)
+            self.server = QgisMCPServer(
+                port=port, iface=self.iface, on_clients_changed=self._on_clients_changed
+            )
             if self.server.start():
                 self.action.setIcon(self._green_logo_icon())
                 self.action.setText(f"MCP :{port}")
