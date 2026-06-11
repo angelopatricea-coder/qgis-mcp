@@ -3203,7 +3203,10 @@ class MCPConfiguratorDialog(QDialog):
         self.setMinimumSize(600, 500)
 
         self.repo_dir = Path(__file__).resolve().parent.parent
-        self.github_url = "git+https://github.com/nkarasiak/qgis-mcp.git"
+        # Zip archive instead of git+ URL: uvx then needs no git executable,
+        # which is not visible to GUI-spawned MCP servers (e.g. Claude Desktop
+        # on Windows).
+        self.github_url = "https://github.com/nkarasiak/qgis-mcp/archive/refs/heads/main.zip"
         self.setup_process = None
 
         self.init_ui()

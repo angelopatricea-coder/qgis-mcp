@@ -23,7 +23,9 @@ from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent
 PLUGIN_SRC = REPO_DIR / "qgis_mcp_plugin"
-GITHUB_URL = "git+https://github.com/nkarasiak/qgis-mcp.git"
+# Zip archive instead of git+ URL: uvx then needs no git executable, which is
+# not visible to GUI-spawned MCP servers (e.g. Claude Desktop on Windows).
+GITHUB_URL = "https://github.com/nkarasiak/qgis-mcp/archive/refs/heads/main.zip"
 
 # ── Platform helpers ────────────────────────────────────────────────────────
 
