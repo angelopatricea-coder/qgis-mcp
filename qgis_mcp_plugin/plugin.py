@@ -123,6 +123,9 @@ from .compat import (
     MSG_CRITICAL,
     MSG_INFO,
     MSG_WARNING,
+    MSGBOX_ACCEPT_ROLE,
+    MSGBOX_QUESTION,
+    MSGBOX_REJECT_ROLE,
     PAINTER_ANTIALIAS,
     PROCESSING_OPTIONAL,
     QVAR_BOOL,
@@ -3862,7 +3865,7 @@ class QgisMCPPlugin:
         clients = ", ".join(sorted({c for c, *_ in affected}))
         box = QMessageBox(self.iface.mainWindow())
         box.setWindowTitle("QGIS MCP — fix offline startup?")
-        box.setIcon(QMessageBox.Question)
+        box.setIcon(MSGBOX_QUESTION)
         box.setText(
             f"Your MCP config for {clients} uses '--refresh-package', which "
             "makes the server fail to start without internet access."
@@ -3872,8 +3875,8 @@ class QgisMCPPlugin:
             "(works offline, faster start; update manually when needed). "
             "Restart your AI client afterwards to take effect."
         )
-        update_btn = box.addButton("Update configs", QMessageBox.AcceptRole)
-        box.addButton("Not now", QMessageBox.RejectRole)
+        update_btn = box.addButton("Update configs", MSGBOX_ACCEPT_ROLE)
+        box.addButton("Not now", MSGBOX_REJECT_ROLE)
         box.exec()
 
         if box.clickedButton() is not update_btn:
