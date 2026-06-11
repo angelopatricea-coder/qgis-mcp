@@ -18,6 +18,7 @@ from qgis.core import (
     QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QIODevice, Qt, QVariant
+from qgis.PyQt.QtGui import QPainter
 from qgis.PyQt.QtWidgets import QToolButton
 
 # ── Layer types ──────────────────────────────────────────────────────
@@ -109,6 +110,16 @@ try:
     TOOLBUTTON_ICON_ONLY = Qt.ToolButtonStyle.ToolButtonIconOnly
 except AttributeError:
     TOOLBUTTON_ICON_ONLY = Qt.ToolButtonIconOnly
+
+try:
+    PAINTER_ANTIALIAS = QPainter.RenderHint.Antialiasing
+except AttributeError:
+    PAINTER_ANTIALIAS = QPainter.Antialiasing
+
+try:
+    ALIGN_CENTER = Qt.AlignmentFlag.AlignCenter
+except AttributeError:
+    ALIGN_CENTER = Qt.AlignCenter
 
 # ── Vector simplification hints ─────────────────────────────────────
 try:

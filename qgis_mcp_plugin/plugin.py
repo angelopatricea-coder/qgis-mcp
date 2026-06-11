@@ -80,7 +80,6 @@ from qgis.PyQt.QtCore import (
     QPointF,
     QProcess,
     QSize,
-    Qt,
     QTimer,
     QUrl,
     QVariant,
@@ -114,6 +113,7 @@ from .compat import (
     AGG_MIN,
     AGG_STDEV,
     AGG_SUM,
+    ALIGN_CENTER,
     GEOM_LINE,
     GEOM_POLYGON,
     IODEVICE_WRITEONLY,
@@ -123,6 +123,7 @@ from .compat import (
     MSG_CRITICAL,
     MSG_INFO,
     MSG_WARNING,
+    PAINTER_ANTIALIAS,
     PROCESSING_OPTIONAL,
     QVAR_BOOL,
     QVAR_DATE,
@@ -3784,7 +3785,7 @@ class QgisMCPPlugin:
         x = 0
         y = size - d  # bottom-left corner
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(PAINTER_ANTIALIAS)
         painter.setBrush(QColor("#D32F2F"))
         pen = QPen(QColor("white"))  # white ring for contrast against the logo
         pen.setWidth(max(2, size // 20))
@@ -3795,7 +3796,7 @@ class QgisMCPPlugin:
         font.setPixelSize(int(d * 0.72))
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(x, y, d, d, Qt.AlignCenter, str(min(count, 9)))
+        painter.drawText(x, y, d, d, ALIGN_CENTER, str(min(count, 9)))
         painter.end()
         return QIcon(pixmap)
 
