@@ -3150,12 +3150,15 @@ def _client_config_registry(repo_dir):
     else:
         zed_cfg = home / ".config" / "zed" / "settings.json"
 
+    opencode_cfg = home / ".config" / "opencode" / "opencode.json"
+
     return {
         "claude-desktop": {"path": claude_cfg, "key": "mcpServers"},
         "cursor": {"path": cursor_cfg, "key": "mcpServers"},
         "vscode": {"path": vscode_cfg, "key": "mcpServers", "project_local": True},
         "windsurf": {"path": windsurf_cfg, "key": "mcpServers"},
         "zed": {"path": zed_cfg, "key": "context_servers"},
+        "opencode": {"path": opencode_cfg, "key": "mcp"},
         "claude-code": {"print_only": True},
     }
 
@@ -3225,7 +3228,7 @@ class MCPConfiguratorDialog(QDialog):
         client_row.addWidget(QLabel("AI client:"))
         self.client_combo = QComboBox()
         self.client_combo.addItems(
-            ["claude-desktop", "cursor", "vscode", "windsurf", "zed", "claude-code"]
+            ["claude-code", "claude-desktop", "cursor", "opencode", "vscode", "windsurf", "zed"]
         )
         self.client_combo.setMinimumWidth(180)
         self.client_combo.currentTextChanged.connect(self._on_client_changed)
@@ -3518,6 +3521,11 @@ class MCPConfiguratorDialog(QDialog):
                     "env": {"QGIS_MCP_TRANSPORT": "stdio"},
                 },
                 "settings": {},
+            }
+        if client == "opencode":
+            return {
+                "type": "local",
+                "command": [entry["command"], *entry["args"]],
             }
         return entry
 
