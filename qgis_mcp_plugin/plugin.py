@@ -3293,6 +3293,18 @@ class MCPConfiguratorDialog(QDialog):
         client_row.addStretch()
         layout.addLayout(client_row)
 
+        # ── Startup ──────────────────────────────────────────────────
+        self.autostart_check = QCheckBox("Start MCP server automatically when QGIS opens")
+        self.autostart_check.setToolTip(
+            "Launch the MCP server on QGIS startup so an AI agent can reconnect\n"
+            "without manually starting it (e.g. after a crash and restart)."
+        )
+        self.autostart_check.setChecked(
+            QgsSettings().value(f"{QgisMCPPlugin.SETTINGS_PREFIX}/autostart", False, type=bool)
+        )
+        self.autostart_check.toggled.connect(self._save_autostart)
+        layout.addWidget(self.autostart_check)
+
         # ── Preview area ─────────────────────────────────────────────
         self.preview_label = QLabel("Add to your client config file:")
         layout.addWidget(self.preview_label)
@@ -3363,6 +3375,10 @@ class MCPConfiguratorDialog(QDialog):
     def _is_dev_install(self):
         """True when the plugin is running from a git-cloned repository."""
         return (self.repo_dir / ".git").exists()
+
+    def _save_autostart(self, checked):
+        """Persist the auto-start-on-QGIS-startup preference."""
+        QgsSettings().setValue(f"{QgisMCPPlugin.SETTINGS_PREFIX}/autostart", checked)
 
     def _find_uv(self):
         """Return uv executable path, checking common Windows install locations."""
@@ -3741,14 +3757,7 @@ class QgisMCPPlugin:
         self.help_action = QAction(self._logo_icon(), "MCP Setup Configurator", self.iface.mainWindow())
         self.help_action.triggered.connect(self._show_help)
 
-        # Auto-start toggle in the plugin submenu (mirrors the toolbar checkbox)
-        self.autostart_action = QAction("Auto-start on startup", self.iface.mainWindow())
-        self.autostart_action.setCheckable(True)
-        self.autostart_action.setChecked(self.autostart_cb.isChecked())
-        self.autostart_action.toggled.connect(self._save_autostart)
-
         self.iface.addPluginToMenu("QGIS MCP", self.action)
-        self.iface.addPluginToMenu("QGIS MCP", self.autostart_action)
         self.iface.addPluginToMenu("QGIS MCP", self.help_action)
 
         # Set the icon on the "QGIS MCP" submenu itself (top-level entry)
@@ -3823,18 +3832,8 @@ class QgisMCPPlugin:
         dlg.exec()
 
     def _save_autostart(self, checked):
-        """Persist auto-start preference and keep both controls in sync.
-
-        The setting is exposed twice — a checkbox in the toolbar dropdown and a
-        checkable action in the plugin submenu — so toggling one mirrors to the
-        other (signals blocked to avoid a feedback loop).
-        """
+        """Persist auto-start preference."""
         QgsSettings().setValue(f"{self.SETTINGS_PREFIX}/autostart", checked)
-        for widget in (self.autostart_cb, getattr(self, "autostart_action", None)):
-            if widget is not None and widget.isChecked() != checked:
-                widget.blockSignals(True)
-                widget.setChecked(checked)
-                widget.blockSignals(False)
 
     def _save_port(self, port):
         """Persist port preference."""
@@ -3885,6 +3884,13 @@ class QgisMCPPlugin:
         """Show the MCP Setup & Configurator dialog."""
         dlg = MCPConfiguratorDialog(self.iface, self.iface.mainWindow())
         dlg.exec()
+        # Reflect an auto-start change made in the dialog onto the toolbar checkbox.
+        if hasattr(self, "autostart_cb"):
+            saved = QgsSettings().value(f"{self.SETTINGS_PREFIX}/autostart", False, type=bool)
+            if self.autostart_cb.isChecked() != saved:
+                self.autostart_cb.blockSignals(True)
+                self.autostart_cb.setChecked(saved)
+                self.autostart_cb.blockSignals(False)
 
     def _check_stale_mcp_configs(self):
         """Offer (once) to remove --refresh-package from existing uvx configs.
@@ -3999,10 +4005,6 @@ class QgisMCPPlugin:
             self.port_spin.valueChanged.disconnect(self._save_port)
         if hasattr(self, "autostart_cb"):
             self.autostart_cb.toggled.disconnect(self._save_autostart)
-        if getattr(self, "autostart_action", None):
-            self.autostart_action.toggled.disconnect(self._save_autostart)
-            self.iface.removePluginMenu("QGIS MCP", self.autostart_action)
-            self.autostart_action = None
 
 
 # Plugin entry point
